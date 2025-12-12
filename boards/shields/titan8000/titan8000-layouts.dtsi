@@ -4,7 +4,7 @@
 	titan8000_physical_layout: titan8000_physical_layout {
 		compatible = "zmk,physical-layout";
 		display-name = "TITAN 8000";
-		transform = <&matrix_transform>;
+		transform = <&default_transform>;
         kscan = <&kscan0>;
 
         keys  //                     w   h    x    y     rot    rx    ry
