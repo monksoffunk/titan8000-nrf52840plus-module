@@ -40,7 +40,8 @@ void buzzer_beep(uint32_t freq_hz, uint32_t duration_ms)
 
     pwm_set_dt(&buzzer_pwm, period_ns, period_ns / 2);  // 50% duty
     k_msleep(duration_ms);
-    pwm_set_dt(&buzzer_pwm, 0, 0);  // off
+//    pwm_set_dt(&buzzer_pwm, 0, 0);  // off
+	pwm_set_dt(&buzzer_pwm, period_ns, 0);   // off
 }
 
 static void melody_timer_callback(struct k_timer *timer)
