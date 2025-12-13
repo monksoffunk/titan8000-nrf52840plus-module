@@ -89,7 +89,8 @@ static int buzzer_init(void)
     LOG_ERR("PWM Device: %s", buzzer_pwm.dev->name);
     LOG_ERR("PWM Ready: YES");
     LOG_ERR("========================================");
-    
+    			buzzer_play_melody(calc30_startup, ARRAY_SIZE(calc30_startup), false);
+
     return 0;
 }
 
