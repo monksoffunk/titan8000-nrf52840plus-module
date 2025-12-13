@@ -80,13 +80,14 @@ bool buzzer_is_playing(void)
 
 static int buzzer_keypress_listener(const zmk_event_t *eh)
 {
-    const struct zmk_position_state_changed *ev = as_zmk_position_state_changed(eh);
+    struct zmk_position_state_changed *ev = as_zmk_position_state_changed(eh);
     if (ev == NULL) {
         return ZMK_EV_EVENT_BUBBLE;
     }
 
     // キーが押された時のみ音を鳴らす（離された時は鳴らさない）
     if (ev->state) {
+        LOG_DBG("Key pressed at position %d", ev->position);
         buzzer_beep(1000, 50);  // 1kHz, 50ms
     }
 
