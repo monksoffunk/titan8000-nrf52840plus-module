@@ -3,4 +3,7 @@ if SHIELD_TITAN8000
 config ZMK_KEYBOARD_NAME
 	default "Titan 8000"
 
+config PWM
+    default y
+
 endif
