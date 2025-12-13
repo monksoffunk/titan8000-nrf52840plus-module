@@ -17,6 +17,16 @@ static uint32_t current_index = 0;
 static bool melody_loop = false;
 static struct k_timer melody_timer;
 
+const note_t success[] = {
+    {NOTE_E6, 80}, {NOTE_B6, 80}, {NOTE_E7, 400},
+};
+
+const note_t warning[] = {
+    {NOTE_A6, 100}, {NOTE_REST, 80},
+    {NOTE_A6, 100}, {NOTE_REST, 80},
+    {NOTE_A6, 100},
+};
+
 void buzzer_beep(uint32_t freq_hz, uint32_t duration_ms)
 {
     if (!device_is_ready(buzzer_pwm.dev)) {
@@ -89,7 +99,7 @@ static int buzzer_init(void)
     LOG_ERR("PWM Device: %s", buzzer_pwm.dev->name);
     LOG_ERR("PWM Ready: YES");
     LOG_ERR("========================================");
-    			buzzer_play_melody(calc30_startup, ARRAY_SIZE(calc30_startup), false);
+    			buzzer_play_melody(success, ARRAY_SIZE(success), false);
 
     return 0;
 }
