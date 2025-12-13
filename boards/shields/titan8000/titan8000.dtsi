@@ -2,6 +2,14 @@
 #include "titan8000-layouts.dtsi"
 
 / {
+	buzzers {
+		compatible = "pwm-buzzers";
+		buzzer: buzzer {
+			pwms = <&pwm0 0 PWM_MSEC(1) PWM_POLARITY_NORMAL>;
+			label = "Buzzer";
+		};
+	};
+
 	kscan0: kscan {
 		compatible = "zmk,kscan-gpio-charlieplex";
 		wakeup-source;
@@ -41,5 +49,27 @@
         gpios = <13 GPIO_ACTIVE_LOW>;			// GPIO0 13 is active-low for fast charge mode (100mA)
         output-high;							// set normal charge mode (non-fast charge mode (50mA))
 		gpio-hog;
+    };
+};
+
+&pwm0 {
+    status = "okay";
+    pinctrl-0 = <&pwm0_default>;
+    pinctrl-1 = <&pwm0_sleep>;
+    pinctrl-names = "default", "sleep";
+};
+
+&pinctrl {
+    // Other pinctrl definitions for other hardware
+    pwm0_default: pwm0_default {
+        group1 {
+            psels = <NRF_PSEL(PWM_OUT0, 1, 7)>;    // port 1, pin 07
+        };
+    };
+    pwm0_sleep: pwm0_sleep {
+        group1 {
+            psels = <NRF_PSEL(PWM_OUT0, 1, 7)>;
+            low-power-enable;
+        };
     };
 };
