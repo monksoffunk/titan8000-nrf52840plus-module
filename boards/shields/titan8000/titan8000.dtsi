@@ -52,7 +52,11 @@
 };
 
 &spi1 {
-        status = "disabled";
+    status = "disabled";
+};
+
+&xiao_i2c {
+    status = "disabled";
 };
 
 &pwm0 {
