@@ -3,12 +3,11 @@
 
 / {
 	buzzers {
-		compatible = "pwm-buzzers";
-		buzzer: buzzer {
-			pwms = <&pwm0 0 PWM_MSEC(1) PWM_POLARITY_NORMAL>;
-			label = "Buzzer";
-		};
-	};
+        compatible = "pwm-leds"; // use pwm-leds for general pwm device
+        buzzer_channel: buzzer {
+            pwms = <&pwm0 0 0 PWM_POLARITY_NORMAL>;
+        };
+    };
 
 	kscan0: kscan {
 		compatible = "zmk,kscan-gpio-charlieplex";
