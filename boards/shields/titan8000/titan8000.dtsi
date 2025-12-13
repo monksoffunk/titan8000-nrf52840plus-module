@@ -38,7 +38,7 @@
 	buzzers {
         compatible = "pwm-leds"; // use pwm-leds for general pwm device
         buzzer_channel: buzzer {
-            pwms = <&pwm0 0 0 PWM_POLARITY_INVERTED>;
+            pwms = <&pwm0 0 0 PWM_POLARITY_NORMAL>;
         };
     };
 };
@@ -49,6 +49,10 @@
         output-high;							// set normal charge mode (non-fast charge mode (50mA))
 		gpio-hog;
     };
+};
+
+&spi1 {
+        status = "disabled";
 };
 
 &pwm0 {
