@@ -72,9 +72,9 @@ const note_t warning[] = {
 void buzzer_beep(uint32_t freq_hz, uint32_t duration_ms)
 {
     if (!device_is_ready(buzzer_pwm.dev)) {
-		    LOG_ERR("========================================");
-			LOG_ERR("PWM BUZZER not ready!!");
-		    LOG_ERR("========================================");
+		    LOG_INF("========================================");
+			LOG_INF("PWM BUZZER not ready!!");
+		    LOG_INF("========================================");
         return;
     }
 
@@ -179,21 +179,21 @@ static void stop_advertising_beep(void)
     if (is_advertising_beep_active) {
         is_advertising_beep_active = false;
         k_timer_stop(&advertising_beep_timer);
-        LOG_ERR("Advertising beep stopped");
+        LOG_INF("Advertising beep stopped");
     }
 }
 
 static int buzzer_init(void)
 {
-    LOG_ERR("========================================");
-    LOG_ERR("BUZZER MODULE INITIALIZED");
+    LOG_INF("========================================");
+    LOG_INF("BUZZER MODULE INITIALIZED");
     if (!device_is_ready(buzzer_pwm.dev)) {
-        LOG_ERR("PWM Device NOT READY!");
+        LOG_INF("PWM Device NOT READY!");
         return -ENODEV;
     }
-    LOG_ERR("PWM Device: %s", buzzer_pwm.dev->name);
-    LOG_ERR("PWM Ready: YES");
-    LOG_ERR("========================================");
+    LOG_INF("PWM Device: %s", buzzer_pwm.dev->name);
+    LOG_INF("PWM Ready: YES");
+    LOG_INF("========================================");
     
     // Initialize timers once
     k_timer_init(&melody_timer, melody_timer_callback, NULL);
