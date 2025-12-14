@@ -40,5 +40,18 @@ void buzzer_beep(uint32_t freq_hz, uint32_t duration_ms);
 void buzzer_play_melody(const note_t *melody, uint32_t length, bool loop);
 void buzzer_stop_melody(void);
 bool buzzer_is_playing(void);
+
+/**
+ * @brief Toggles the keypress beep feature on or off.
+ *
+ * When enabled, the buzzer will emit a beep sound on each keypress.
+ * Calling this function switches the current state (enabled/disabled).
+ */
 void buzzer_toggle_keypress_beep(void);
+
+/**
+ * @brief Checks if the keypress beep feature is enabled.
+ *
+ * @return true if keypress beep is enabled, false otherwise.
+ */
 bool buzzer_is_keypress_beep_enabled(void);
