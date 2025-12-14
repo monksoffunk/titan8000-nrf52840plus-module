@@ -118,7 +118,6 @@ void buzzer_play_melody(const note_t *melody, uint32_t length, bool loop)
     current_index = 0;
     melody_loop = loop;
 
-    k_timer_init(&melody_timer, melody_timer_callback, NULL);
     k_timer_start(&melody_timer, K_NO_WAIT, K_NO_WAIT);
 }
 
@@ -170,7 +169,6 @@ static void start_advertising_beep(void)
 {
     if (!is_advertising_beep_active) {
         is_advertising_beep_active = true;
-        k_timer_init(&advertising_beep_timer, advertising_beep_callback, NULL);
         k_timer_start(&advertising_beep_timer, K_SECONDS(3), K_SECONDS(3));
         LOG_INF("Advertising beep started");
     }
@@ -196,7 +194,12 @@ static int buzzer_init(void)
     LOG_ERR("PWM Device: %s", buzzer_pwm.dev->name);
     LOG_ERR("PWM Ready: YES");
     LOG_ERR("========================================");
-    			buzzer_play_melody(success, ARRAY_SIZE(success), false);
+    
+    // Initialize timers once
+    k_timer_init(&melody_timer, melody_timer_callback, NULL);
+    k_timer_init(&advertising_beep_timer, advertising_beep_callback, NULL);
+    
+    buzzer_play_melody(success, ARRAY_SIZE(success), false);
 
     return 0;
 }
