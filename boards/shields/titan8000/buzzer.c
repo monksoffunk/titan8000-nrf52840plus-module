@@ -170,7 +170,7 @@ static void start_advertising_beep(void)
         is_advertising_beep_active = true;
         k_timer_init(&advertising_beep_timer, advertising_beep_callback, NULL);
         k_timer_start(&advertising_beep_timer, K_SECONDS(3), K_SECONDS(3));
-        LOG_ERR("Advertising beep started");
+        LOG_INF("Advertising beep started");
     }
 }
 
