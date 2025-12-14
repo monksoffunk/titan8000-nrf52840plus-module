@@ -120,7 +120,7 @@ static int buzzer_keypress_listener(const zmk_event_t *eh)
     // キーが押された時のみ音を鳴らす（離された時は鳴らさない）
     if (ev->state) {
         LOG_ERR("KEY PRESSED at position %d", ev->position);
-        buzzer_beep(1000, 50);  // 1kHz, 50ms
+        buzzer_beep(4000, 50);  // 4kHz, 50ms
     }
 
     return ZMK_EV_EVENT_BUBBLE;
