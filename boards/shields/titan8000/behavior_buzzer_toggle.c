@@ -11,9 +11,7 @@
 #include <drivers/behavior.h>
 #include <zmk/behavior.h>
 
-#define BUZZER_NODE DT_CHILD(DT_PATH(buzzers), buzzer)
-
-#if DT_NODE_EXISTS(BUZZER_NODE)
+#ifdef CONFIG_TITAN8000_BUZZER
 #include "buzzer.h"
 #endif
 
@@ -23,7 +21,7 @@ LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 
 static int on_keymap_binding_pressed(struct zmk_behavior_binding *binding,
                                      struct zmk_behavior_binding_event event) {
-#if DT_NODE_EXISTS(BUZZER_NODE)
+#ifdef CONFIG_TITAN8000_BUZZER
     buzzer_toggle_keypress_beep();
 #endif
     return ZMK_BEHAVIOR_OPAQUE;
