@@ -4,18 +4,15 @@
  * SPDX-License-Identifier: MIT
  */
 
+#ifdef CONFIG_TITAN8000_BUZZER
+
 / {
     behaviors {
-#ifdef CONFIG_TITAN8000_BUZZER
         /omit-if-no-ref/ buzzer_tog: buzzer_tog {
             compatible = "zmk,behavior-buzzer-tog";
             #binding-cells = <0>;
         };
-#else
-        /omit-if-no-ref/ buzzer_tog: buzzer_tog {
-            compatible = "zmk,behavior-none";
-            #binding-cells = <0>;
-        };
-#endif
     };
 };
+
+#endif /* CONFIG_TITAN8000_BUZZER */
