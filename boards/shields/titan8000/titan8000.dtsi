@@ -35,19 +35,3 @@
 	>;
 	};
 };
-
-&gpio0 {
-    charge_current_ctrl: charge-current-ctrl {
-        gpios = <13 GPIO_ACTIVE_LOW>;			// GPIO0 13 is active-low for fast charge mode (100mA)
-        output-high;							// set normal charge mode (non-fast charge mode (50mA))
-		gpio-hog;
-    };
-};
-
-&spi1 {
-    status = "disabled";
-};
-
-&xiao_i2c {
-    status = "disabled";
-};
