@@ -11,7 +11,9 @@
 #include <drivers/behavior.h>
 #include <zmk/behavior.h>
 
+#ifdef CONFIG_BOARD_SEEEDUINO_XIAO_BLE
 #include "buzzer.h"
+#endif
 
 LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 
@@ -19,7 +21,9 @@ LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 
 static int on_keymap_binding_pressed(struct zmk_behavior_binding *binding,
                                      struct zmk_behavior_binding_event event) {
+#ifdef CONFIG_BOARD_SEEEDUINO_XIAO_BLE
     buzzer_toggle_keypress_beep();
+#endif
     return ZMK_BEHAVIOR_OPAQUE;
 }
 

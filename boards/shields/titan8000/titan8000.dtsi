@@ -34,13 +34,6 @@
 			RC(0,4) RC(1,4) RC(2,4) RC(3,4) RC(5,4) RC(6,4) RC(7,4) RC(8,4) RC(9,4) RC(6,8) RC(7,8) RC(9,8)
 	>;
 	};
-
-	buzzers {
-        compatible = "pwm-leds"; // use pwm-leds for general pwm device
-        buzzer_channel: buzzer {
-            pwms = <&pwm0 0 0 PWM_POLARITY_NORMAL>;
-        };
-    };
 };
 
 &gpio0 {
@@ -57,26 +50,4 @@
 
 &xiao_i2c {
     status = "disabled";
-};
-
-&pwm0 {
-    status = "okay";
-    pinctrl-0 = <&pwm0_default>;
-    pinctrl-1 = <&pwm0_sleep>;
-    pinctrl-names = "default", "sleep";
-};
-
-&pinctrl {
-    // Other pinctrl definitions for other hardware
-    pwm0_default: pwm0_default {
-        group1 {
-            psels = <NRF_PSEL(PWM_OUT0, 1, 7)>;    // port 1, pin 07
-        };
-    };
-    pwm0_sleep: pwm0_sleep {
-        group1 {
-            psels = <NRF_PSEL(PWM_OUT0, 1, 7)>;
-            low-power-enable;
-        };
-    };
 };
