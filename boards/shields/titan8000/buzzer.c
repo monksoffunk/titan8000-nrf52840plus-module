@@ -12,6 +12,10 @@
 LOG_MODULE_REGISTER(buzzer, CONFIG_ZMK_LOG_LEVEL);
 
 #define BUZZER_NODE DT_CHILD(DT_PATH(buzzers), buzzer)
+
+#if DT_NODE_EXISTS(BUZZER_NODE)
+
+// Buzzer implementation (only compiled when buzzer node exists in devicetree)
 static const struct pwm_dt_spec buzzer_pwm = PWM_DT_SPEC_GET(BUZZER_NODE);
 static const note_t *current_melody = NULL;
 static uint32_t melody_length = 0;
@@ -257,3 +261,5 @@ static int buzzer_ble_profile_listener(const zmk_event_t *eh)
 
 ZMK_LISTENER(buzzer_ble, buzzer_ble_profile_listener);
 ZMK_SUBSCRIPTION(buzzer_ble, zmk_ble_active_profile_changed);
+
+#endif /* DT_NODE_EXISTS(BUZZER_NODE) */
