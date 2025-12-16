@@ -18,11 +18,16 @@
 };
 
 / {
-    kscan0: kscan {
+    kscan0: kscan0 {
 		compatible = "titan8000,kscan-gpio-charlieplex";
 		wakeup-source;
 		
 		interrupt-gpios = <&xiao_d 10 (GPIO_ACTIVE_HIGH | GPIO_PULL_DOWN) >;
+		
+		debounce-press-ms = <5>;
+		debounce-release-ms = <5>;
+		debounce-scan-period-ms = <1>;
+		poll-period-ms = <1>;
 
 		status = "okay";
         gpios
