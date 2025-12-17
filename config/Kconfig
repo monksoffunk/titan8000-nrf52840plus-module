@@ -1,0 +1,15 @@
+# SPDX-License-Identifier: MIT
+
+# Module-side Kconfig to ensure required ZMK support is enabled when using
+# the Titan8000 custom kscan compatible.
+
+if KSCAN
+
+DT_COMPAT_TITAN8000_KSCAN_GPIO_CHARLIEPLEX := titan8000,kscan-gpio-charlieplex
+
+config TITAN8000_KSCAN_GPIO_CHARLIEPLEX
+    bool
+    default $(dt_compat_enabled,$(DT_COMPAT_TITAN8000_KSCAN_GPIO_CHARLIEPLEX))
+    select ZMK_KSCAN_GPIO_DRIVER
+
+endif # KSCAN
