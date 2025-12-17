@@ -39,20 +39,9 @@ LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 
 #define INST_DISCHARGE_US(n) DT_INST_PROP_OR(n, discharge_before_inputs_us, 0)
 
-/*
- * DT_INST_FOREACH_PROP_ELEM_SEP() callback signature differs across Zephyr versions.
- * Some pass (idx, inst), others pass (inst, prop, idx). Support both.
- */
-#define _KSCAN_GPIO_CFG_INIT_2(idx, inst_idx)                                                      \
+/* Match ZMK v0.3-branch upstream: LISTIFY() expects fn(idx, inst_idx). */
+#define KSCAN_GPIO_CFG_INIT(idx, inst_idx)                                                         \
     GPIO_DT_SPEC_GET_BY_IDX(DT_DRV_INST(inst_idx), gpios, idx)
-
-#define _KSCAN_GPIO_CFG_INIT_3(inst_idx, prop, idx)                                                \
-    GPIO_DT_SPEC_GET_BY_IDX(DT_DRV_INST(inst_idx), prop, idx)
-
-#define _KSCAN_GPIO_CFG_INIT_SELECT(_1, _2, _3, NAME, ...) NAME
-#define KSCAN_GPIO_CFG_INIT(...)                                                                    \
-    _KSCAN_GPIO_CFG_INIT_SELECT(__VA_ARGS__, _KSCAN_GPIO_CFG_INIT_3, _KSCAN_GPIO_CFG_INIT_2)(       \
-        __VA_ARGS__)
 
 #define INST_INTR_DEFINED(n) DT_INST_NODE_HAS_PROP(n, interrupt_gpios)
 
@@ -99,16 +88,6 @@ struct kscan_charlieplex_config {
     int32_t discharge_before_inputs_us;
 };
 
-static bool any_debounce_active(const struct zmk_debounce_state *states, const size_t len) {
-    for (size_t i = 0; i < len; i++) {
-        if (zmk_debounce_is_active(&states[i])) {
-            return true;
-        }
-    }
-
-    return false;
-}
-
 /**
  * Get the index into a matrix state array from a row and column.
  * There are effectively (n) cols and (n-1) rows, but we use the full col x row space
@@ -152,7 +131,12 @@ static int kscan_charlieplex_set_as_output(const struct gpio_dt_spec *gpio) {
         return err;
     }
 
-    return 0;
+    err = gpio_pin_set_dt(gpio, 1);
+    if (err) {
+        LOG_ERR("Failed to set output pin %u active: %i", gpio->pin, err);
+    }
+
+    return err;
 }
 
 static int kscan_charlieplex_set_all_as_input(const struct device *dev) {
@@ -180,14 +164,16 @@ static int kscan_charlieplex_set_all_outputs(const struct device *dev, const int
         }
 
         err = gpio_pin_set_dt(gpio, value);
-        if (err < 0) {
-            LOG_ERR("Unable to set pin %u on %s", gpio->pin, gpio->port->name);
+        if (err) {
+            LOG_ERR("Failed to set output %i to %i: %i", i, value, err);
             return err;
         }
     }
 
     return 0;
 }
+
+#if IS_ENABLED(CONFIG_PM_DEVICE)
 
 static int kscan_charlieplex_disconnect_all(const struct device *dev) {
     const struct kscan_charlieplex_config *config = dev->config;
@@ -197,7 +183,7 @@ static int kscan_charlieplex_disconnect_all(const struct device *dev) {
 
         int err = gpio_pin_configure_dt(gpio, GPIO_DISCONNECTED);
         if (err) {
-            LOG_ERR("Unable to configure pin %u on %s for disconnected", gpio->pin, gpio->port->name);
+            LOG_ERR("Unable to configure pin %u on %s for input", gpio->pin, gpio->port->name);
             return err;
         }
     }
@@ -205,19 +191,16 @@ static int kscan_charlieplex_disconnect_all(const struct device *dev) {
     return 0;
 }
 
+#endif
+
 static int kscan_charlieplex_interrupt_configure(const struct device *dev,
                                                 const gpio_flags_t flags) {
     const struct kscan_charlieplex_config *config = dev->config;
+    const struct gpio_dt_spec *gpio = &config->interrupt;
 
-    if (!device_is_ready(config->interrupt.port)) {
-        LOG_ERR("GPIO is not ready: %s", config->interrupt.port->name);
-        return -ENODEV;
-    }
-
-    int err = gpio_pin_interrupt_configure_dt(&config->interrupt, flags);
+    int err = gpio_pin_interrupt_configure_dt(gpio, flags);
     if (err) {
-        LOG_ERR("Unable to configure interrupt on %s.%u", config->interrupt.port->name,
-                config->interrupt.pin);
+        LOG_ERR("Unable to configure interrupt for pin %u on %s", gpio->pin, gpio->port->name);
         return err;
     }
 
@@ -234,45 +217,37 @@ static int kscan_charlieplex_interrupt_enable(const struct device *dev) {
 }
 
 static void kscan_charlieplex_irq_callback(const struct device *port, struct gpio_callback *cb,
-                                          gpio_port_pins_t pins) {
-    ARG_UNUSED(port);
-    ARG_UNUSED(pins);
-
+                                          const gpio_port_pins_t _pin) {
     struct kscan_charlieplex_data *data =
         CONTAINER_OF(cb, struct kscan_charlieplex_data, irq_callback);
 
+    /* Disable our interrupt to avoid re-entry while we scan. */
     kscan_charlieplex_interrupt_configure(data->dev, GPIO_INT_DISABLE);
-    k_work_schedule(&data->work, K_NO_WAIT);
+    data->scan_time = k_uptime_get();
+    k_work_reschedule(&data->work, K_NO_WAIT);
 }
 
 static void kscan_charlieplex_read_continue(const struct device *dev) {
     const struct kscan_charlieplex_config *config = dev->config;
     struct kscan_charlieplex_data *data = dev->data;
 
-    int32_t next_delay_ms = config->poll_period_ms;
-
-    if (any_debounce_active(data->charlieplex_state, config->cells.len * config->cells.len)) {
-        next_delay_ms = config->debounce_scan_period_ms;
-    }
-
-    data->scan_time = k_uptime_get();
-    k_work_schedule(&data->work, K_MSEC(next_delay_ms));
+    data->scan_time += config->debounce_scan_period_ms;
+    k_work_reschedule(&data->work, K_TIMEOUT_ABS_MS(data->scan_time));
 }
 
 static void kscan_charlieplex_read_end(const struct device *dev) {
     struct kscan_charlieplex_data *data = dev->data;
     const struct kscan_charlieplex_config *config = dev->config;
 
-    if (any_debounce_active(data->charlieplex_state, config->cells.len * config->cells.len)) {
-        kscan_charlieplex_read_continue(dev);
-        return;
-    }
-
     if (config->use_interrupt) {
+        /* Return to waiting for an interrupt. */
         kscan_charlieplex_interrupt_enable(dev);
-    }
+    } else {
+        data->scan_time += config->poll_period_ms;
 
-    data->scan_time = 0;
+        /* Return to polling slowly. */
+        k_work_reschedule(&data->work, K_TIMEOUT_ABS_MS(data->scan_time));
+    }
 }
 
 static int kscan_charlieplex_read(const struct device *dev) {
@@ -280,6 +255,10 @@ static int kscan_charlieplex_read(const struct device *dev) {
     const struct kscan_charlieplex_config *config = dev->config;
     bool continue_scan = false;
 
+    /*
+     * RR vs MATRIX: set all pins as input, in case there was a failure on a
+     * previous scan, and one of the pins is still set as output
+     */
     int err = kscan_charlieplex_set_all_as_input(dev);
     if (err) {
         return err;
@@ -306,12 +285,6 @@ static int kscan_charlieplex_read(const struct device *dev) {
             return err;
         }
 
-        err = gpio_pin_set_dt(out_gpio, 1);
-        if (err < 0) {
-            LOG_ERR("Unable to set pin %u on %s", out_gpio->pin, out_gpio->port->name);
-            return err;
-        }
-
 #if CONFIG_ZMK_KSCAN_CHARLIEPLEX_WAIT_BEFORE_INPUTS > 0
         k_busy_wait(CONFIG_ZMK_KSCAN_CHARLIEPLEX_WAIT_BEFORE_INPUTS);
 #endif
@@ -322,29 +295,25 @@ static int kscan_charlieplex_read(const struct device *dev) {
             }
 
             const struct gpio_dt_spec *in_gpio = &config->cells.gpios[col];
-            int key_state = gpio_pin_get_dt(in_gpio);
-            if (key_state < 0) {
-                LOG_ERR("Unable to read pin %u on %s", in_gpio->pin, in_gpio->port->name);
-                return key_state;
-            }
+            const int index = state_index(config, row, col);
 
-            const int state_idx = state_index(config, row, col);
-
-            struct zmk_debounce_state *state = &data->charlieplex_state[state_idx];
-            zmk_debounce_update(state, key_state, config->debounce_scan_period_ms,
+            struct zmk_debounce_state *state = &data->charlieplex_state[index];
+            zmk_debounce_update(state, gpio_pin_get_dt(in_gpio), config->debounce_scan_period_ms,
                                 &config->debounce_config);
 
+            /*
+             * RR vs MATRIX: because we don't need an input/output => row/column
+             * setup, we can update in the same loop.
+             */
             if (zmk_debounce_get_changed(state)) {
-                data->callback(dev, row, col, zmk_debounce_is_pressed(state));
+                const bool pressed = zmk_debounce_is_pressed(state);
+
+                LOG_DBG("Sending event at %i,%i state %s", row, col, pressed ? "on" : "off");
+
+                data->callback(dev, row, col, pressed);
             }
 
             continue_scan = continue_scan || zmk_debounce_is_active(state);
-        }
-
-        err = gpio_pin_set_dt(out_gpio, 0);
-        if (err < 0) {
-            LOG_ERR("Unable to set pin %u on %s", out_gpio->pin, out_gpio->port->name);
-            return err;
         }
 
         err = kscan_charlieplex_set_as_input(out_gpio);
@@ -367,36 +336,28 @@ static int kscan_charlieplex_read(const struct device *dev) {
 }
 
 static void kscan_charlieplex_work_handler(struct k_work *work) {
-    struct k_work_delayable *dwork = k_work_delayable_from_work(work);
+    struct k_work_delayable *dwork = CONTAINER_OF(work, struct k_work_delayable, work);
     struct kscan_charlieplex_data *data = CONTAINER_OF(dwork, struct kscan_charlieplex_data, work);
 
     kscan_charlieplex_read(data->dev);
 }
 
 static int kscan_charlieplex_configure(const struct device *dev, const kscan_callback_t callback) {
-    struct kscan_charlieplex_data *data = dev->data;
-
     if (!callback) {
         return -EINVAL;
     }
 
+    struct kscan_charlieplex_data *data = dev->data;
     data->callback = callback;
     return 0;
 }
 
 static int kscan_charlieplex_enable(const struct device *dev) {
     struct kscan_charlieplex_data *data = dev->data;
-    const struct kscan_charlieplex_config *config = dev->config;
 
-    data->scan_time = 0;
+    data->scan_time = k_uptime_get();
 
-    if (config->use_interrupt) {
-        int err = kscan_charlieplex_interrupt_enable(dev);
-        if (err) {
-            return err;
-        }
-    }
-
+    /* Read will automatically start interrupts/polling once done. */
     return kscan_charlieplex_read(dev);
 }
 
@@ -405,50 +366,12 @@ static int kscan_charlieplex_disable(const struct device *dev) {
 
     k_work_cancel_delayable(&data->work);
 
-    data->scan_time = 0;
-    return 0;
-}
-
-static int kscan_charlieplex_init(const struct device *dev) {
-    struct kscan_charlieplex_data *data = dev->data;
     const struct kscan_charlieplex_config *config = dev->config;
-
-    data->dev = dev;
-    k_work_init_delayable(&data->work, kscan_charlieplex_work_handler);
-
     if (config->use_interrupt) {
-        if (!device_is_ready(config->interrupt.port)) {
-            LOG_ERR("GPIO is not ready: %s", config->interrupt.port->name);
-            return -ENODEV;
-        }
-
-        gpio_init_callback(&data->irq_callback, kscan_charlieplex_irq_callback,
-                           BIT(config->interrupt.pin));
-        gpio_add_callback(config->interrupt.port, &data->irq_callback);
+        return kscan_charlieplex_interrupt_configure(dev, GPIO_INT_DISABLE);
     }
 
     return 0;
-}
-
-static int kscan_charlieplex_pm_action(const struct device *dev, enum pm_device_action action) {
-    const struct kscan_charlieplex_config *config = dev->config;
-
-    switch (action) {
-    case PM_DEVICE_ACTION_SUSPEND:
-        if (!config->use_interrupt) {
-            return kscan_charlieplex_disconnect_all(dev);
-        }
-        return 0;
-
-    case PM_DEVICE_ACTION_RESUME:
-        if (!config->use_interrupt) {
-            return kscan_charlieplex_set_all_outputs(dev, 0);
-        }
-        return 0;
-
-    default:
-        return -ENOTSUP;
-    }
 }
 
 static const struct kscan_driver_api kscan_charlieplex_api = {
@@ -457,27 +380,115 @@ static const struct kscan_driver_api kscan_charlieplex_api = {
     .disable_callback = kscan_charlieplex_disable,
 };
 
+static int kscan_charlieplex_init_inputs(const struct device *dev) {
+    const struct kscan_charlieplex_config *config = dev->config;
+
+    for (int i = 0; i < config->cells.len; i++) {
+        int err = kscan_charlieplex_set_as_input(&config->cells.gpios[i]);
+        if (err) {
+            return err;
+        }
+    }
+
+    return 0;
+}
+
+static int kscan_charlieplex_init_interrupt(const struct device *dev) {
+    struct kscan_charlieplex_data *data = dev->data;
+
+    const struct kscan_charlieplex_config *config = dev->config;
+    const struct gpio_dt_spec *gpio = &config->interrupt;
+    int err = kscan_charlieplex_set_as_input(gpio);
+    if (err) {
+        return err;
+    }
+
+    gpio_init_callback(&data->irq_callback, kscan_charlieplex_irq_callback, BIT(gpio->pin));
+    err = gpio_add_callback(gpio->port, &data->irq_callback);
+    if (err) {
+        LOG_ERR("Error adding the callback to the input device: %i", err);
+    }
+    return err;
+}
+
+static void kscan_charlieplex_setup_pins(const struct device *dev) {
+    kscan_charlieplex_init_inputs(dev);
+    kscan_charlieplex_set_all_outputs(dev, 0);
+
+    const struct kscan_charlieplex_config *config = dev->config;
+    if (config->use_interrupt) {
+        kscan_charlieplex_init_interrupt(dev);
+    }
+}
+
+#if IS_ENABLED(CONFIG_PM_DEVICE)
+
+static int kscan_charlieplex_pm_action(const struct device *dev, enum pm_device_action action) {
+    switch (action) {
+    case PM_DEVICE_ACTION_SUSPEND:
+        kscan_charlieplex_interrupt_configure(dev, GPIO_INT_DISABLE);
+        kscan_charlieplex_disconnect_all(dev);
+
+        return kscan_charlieplex_disable(dev);
+    case PM_DEVICE_ACTION_RESUME:
+        kscan_charlieplex_setup_pins(dev);
+
+        return kscan_charlieplex_enable(dev);
+    default:
+        return -ENOTSUP;
+    }
+}
+
+#endif /* IS_ENABLED(CONFIG_PM_DEVICE) */
+
+static int kscan_charlieplex_init(const struct device *dev) {
+    struct kscan_charlieplex_data *data = dev->data;
+
+    data->dev = dev;
+
+    k_work_init_delayable(&data->work, kscan_charlieplex_work_handler);
+
+#if IS_ENABLED(CONFIG_PM_DEVICE)
+    pm_device_init_suspended(dev);
+
+#if IS_ENABLED(CONFIG_PM_DEVICE_RUNTIME)
+    pm_device_runtime_enable(dev);
+#endif
+
+#else
+    kscan_charlieplex_setup_pins(dev);
+#endif
+
+    return 0;
+}
+
 #define KSCAN_CHARLIEPLEX_INIT(n)                                                                  \
-    static const struct gpio_dt_spec gpio_list_##n[] = {DT_INST_FOREACH_PROP_ELEM_SEP(             \
-        n, gpios, KSCAN_GPIO_CFG_INIT, (, ))};                                                     \
-    COND_THIS_INTERRUPT(n, (static const struct gpio_dt_spec interrupt_##n = KSCAN_INTR_CFG_INIT(n);)) \
-    static struct zmk_debounce_state charlieplex_state_##n[INST_CHARLIEPLEX_LEN(n)];                \
-    static struct kscan_charlieplex_data kscan_charlieplex_data_##n = {                            \
-        .charlieplex_state = charlieplex_state_##n,                                                \
-    };                                                                                             \
-    static const struct kscan_charlieplex_config kscan_charlieplex_config_##n = {                 \
-        .cells = KSCAN_GPIO_LIST(gpio_list_##n),                                                   \
-        .debounce_config =                                                                         \
-            ZMK_DEBOUNCE_CONFIG_INIT(INST_DEBOUNCE_PRESS_MS(n), INST_DEBOUNCE_RELEASE_MS(n)),      \
-        .debounce_scan_period_ms = DT_INST_PROP(n, debounce_scan_period_ms),                       \
-        .poll_period_ms = DT_INST_PROP(n, poll_period_ms),                                         \
-        .use_interrupt = INST_INTR_DEFINED(n),                                                     \
-        COND_THIS_INTERRUPT(n, (.interrupt = interrupt_##n,))                                      \
-        .discharge_before_inputs_us = INST_DISCHARGE_US(n),                                        \
-    };                                                                                             \
-    PM_DEVICE_DT_INST_DEFINE(n, kscan_charlieplex_pm_action);                                      \
-    DEVICE_DT_INST_DEFINE(n, kscan_charlieplex_init, PM_DEVICE_DT_INST_GET(n), &kscan_charlieplex_data_##n, \
-                          &kscan_charlieplex_config_##n, POST_KERNEL,                              \
+    BUILD_ASSERT(INST_DEBOUNCE_PRESS_MS(n) <= DEBOUNCE_COUNTER_MAX,                                 \
+                 "ZMK_KSCAN_DEBOUNCE_PRESS_MS or debounce-press-ms is too large");                 \
+    BUILD_ASSERT(INST_DEBOUNCE_RELEASE_MS(n) <= DEBOUNCE_COUNTER_MAX,                               \
+                 "ZMK_KSCAN_DEBOUNCE_RELEASE_MS or debounce-release-ms is too large");             \
+    static struct zmk_debounce_state kscan_charlieplex_state_##n[INST_CHARLIEPLEX_LEN(n)];          \
+    static const struct gpio_dt_spec kscan_charlieplex_cells_##n[] = {                              \
+        LISTIFY(INST_LEN(n), KSCAN_GPIO_CFG_INIT, (, ), n)};                                        \
+    static struct kscan_charlieplex_data kscan_charlieplex_data_##n = {                             \
+        .charlieplex_state = kscan_charlieplex_state_##n,                                           \
+    };                                                                                              \
+    static const struct kscan_charlieplex_config kscan_charlieplex_config_##n = {                  \
+        .cells = KSCAN_GPIO_LIST(kscan_charlieplex_cells_##n),                                      \
+        .debounce_config =                                                                          \
+            {                                                                                       \
+                .debounce_press_ms = INST_DEBOUNCE_PRESS_MS(n),                                     \
+                .debounce_release_ms = INST_DEBOUNCE_RELEASE_MS(n),                                 \
+            },                                                                                      \
+        .debounce_scan_period_ms = DT_INST_PROP(n, debounce_scan_period_ms),                        \
+        COND_ANY_POLLING((.poll_period_ms = DT_INST_PROP(n, poll_period_ms), ))                     \
+            COND_THIS_INTERRUPT(n, (.use_interrupt = INST_INTR_DEFINED(n), ))                       \
+                COND_THIS_INTERRUPT(n, (.interrupt = KSCAN_INTR_CFG_INIT(n), ))                     \
+        .discharge_before_inputs_us = INST_DISCHARGE_US(n),                                         \
+    };                                                                                              \
+    PM_DEVICE_DT_INST_DEFINE(n, kscan_charlieplex_pm_action);                                       \
+    DEVICE_DT_INST_DEFINE(n, &kscan_charlieplex_init, PM_DEVICE_DT_INST_GET(n),                     \
+                          &kscan_charlieplex_data_##n, &kscan_charlieplex_config_##n, POST_KERNEL,  \
                           CONFIG_KSCAN_INIT_PRIORITY, &kscan_charlieplex_api);
 
-DT_INST_FOREACH_STATUS_OKAY(KSCAN_CHARLIEPLEX_INIT)
+DT_INST_FOREACH_STATUS_OKAY(KSCAN_CHARLIEPLEX_INIT);
