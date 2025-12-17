@@ -108,10 +108,8 @@ static int kscan_charlieplex_set_as_input(const struct gpio_dt_spec *gpio) {
         return -ENODEV;
     }
 
-    gpio_flags_t pull_flag =
-        ((gpio->dt_flags & GPIO_ACTIVE_LOW) == GPIO_ACTIVE_LOW) ? GPIO_PULL_UP : GPIO_PULL_DOWN;
-
-    int err = gpio_pin_configure_dt(gpio, GPIO_INPUT | pull_flag);
+    /* Inverted scan: inputs use pull-ups and a pressed key reads low. */
+    int err = gpio_pin_configure_dt(gpio, GPIO_INPUT | GPIO_PULL_UP);
     if (err) {
         LOG_ERR("Unable to configure pin %u on %s for input", gpio->pin, gpio->port->name);
         return err;
@@ -131,9 +129,10 @@ static int kscan_charlieplex_set_as_output(const struct gpio_dt_spec *gpio) {
         return err;
     }
 
-    err = gpio_pin_set_dt(gpio, 1);
+    /* Inverted scan: drive the selected pin low (physical low). */
+    err = gpio_pin_set(gpio->port, gpio->pin, 0);
     if (err) {
-        LOG_ERR("Failed to set output pin %u active: %i", gpio->pin, err);
+        LOG_ERR("Failed to drive output pin %u low: %i", gpio->pin, err);
     }
 
     return err;
@@ -163,7 +162,7 @@ static int kscan_charlieplex_set_all_outputs(const struct device *dev, const int
             return err;
         }
 
-        err = gpio_pin_set_dt(gpio, value);
+        err = gpio_pin_set(gpio->port, gpio->pin, value);
         if (err) {
             LOG_ERR("Failed to set output %i to %i: %i", i, value, err);
             return err;
@@ -264,7 +263,11 @@ static int kscan_charlieplex_read(const struct device *dev) {
         return err;
     }
 
-    for (int row = 0; row < config->cells.len; row++) {
+    /*
+     * Inverted: choose one C (column) pin, drive it low, read all other pins as
+     * inputs w/ pull-ups; a low input on R (row) indicates a pressed key.
+     */
+    for (int col = 0; col < config->cells.len; col++) {
         if (config->discharge_before_inputs_us > 0) {
             err = kscan_charlieplex_set_all_outputs(dev, 0);
             if (err) {
@@ -279,7 +282,7 @@ static int kscan_charlieplex_read(const struct device *dev) {
             }
         }
 
-        const struct gpio_dt_spec *out_gpio = &config->cells.gpios[row];
+        const struct gpio_dt_spec *out_gpio = &config->cells.gpios[col];
         err = kscan_charlieplex_set_as_output(out_gpio);
         if (err) {
             return err;
@@ -289,16 +292,23 @@ static int kscan_charlieplex_read(const struct device *dev) {
         k_busy_wait(CONFIG_ZMK_KSCAN_CHARLIEPLEX_WAIT_BEFORE_INPUTS);
 #endif
 
-        for (int col = 0; col < config->cells.len; col++) {
-            if (col == row) {
+        for (int row = 0; row < config->cells.len; row++) {
+            if (row == col) {
                 continue;
             }
 
-            const struct gpio_dt_spec *in_gpio = &config->cells.gpios[col];
+            const struct gpio_dt_spec *in_gpio = &config->cells.gpios[row];
             const int index = state_index(config, row, col);
 
+            const int read_value = gpio_pin_get(in_gpio->port, in_gpio->pin);
+            if (read_value < 0) {
+                LOG_ERR("Unable to read pin %u on %s", in_gpio->pin, in_gpio->port->name);
+                return read_value;
+            }
+
             struct zmk_debounce_state *state = &data->charlieplex_state[index];
-            zmk_debounce_update(state, gpio_pin_get_dt(in_gpio), config->debounce_scan_period_ms,
+            const bool active = (read_value == 0);
+            zmk_debounce_update(state, active, config->debounce_scan_period_ms,
                                 &config->debounce_config);
 
             /*
