@@ -14,31 +14,8 @@ LOG_MODULE_REGISTER(buzzer, CONFIG_ZMK_LOG_LEVEL);
 #ifdef CONFIG_TITAN8000_BUZZER
 
 #define BUZZER_NODE DT_CHILD(DT_PATH(buzzers), buzzer)
-
-#define BUZZER_HAS_PWMS DT_NODE_HAS_PROP(BUZZER_NODE, pwms)
-
-/*
- * DT_PWMS_* macros require the 'pwms' property to exist.
- * Use COND_CODE_1() to avoid expanding those macros when absent.
- */
-#define BUZZER_PWM_CTLR_NODE DT_PWMS_CTLR_BY_IDX(BUZZER_NODE, 0)
-
-/*
- * DEVICE_DT_GET_OR_NULL() returns NULL unless controller status is okay.
- * This avoids compile-time failures when the controller exists but is disabled.
- */
-#define BUZZER_PWM_DEV COND_CODE_1(BUZZER_HAS_PWMS, (DEVICE_DT_GET_OR_NULL(BUZZER_PWM_CTLR_NODE)), (NULL))
-#define BUZZER_PWM_CHANNEL COND_CODE_1(BUZZER_HAS_PWMS, (DT_PWMS_CHANNEL_BY_IDX(BUZZER_NODE, 0)), (0))
-#define BUZZER_PWM_PERIOD COND_CODE_1(BUZZER_HAS_PWMS, (DT_PWMS_PERIOD_BY_IDX(BUZZER_NODE, 0)), (0))
-#define BUZZER_PWM_FLAGS COND_CODE_1(BUZZER_HAS_PWMS, (DT_PWMS_FLAGS_BY_IDX(BUZZER_NODE, 0)), (0))
-
 // Buzzer implementation (only compiled when CONFIG_TITAN8000_BUZZER is enabled)
-static const struct pwm_dt_spec buzzer_pwm = {
-    .dev = BUZZER_PWM_DEV,
-    .channel = BUZZER_PWM_CHANNEL,
-    .period = BUZZER_PWM_PERIOD,
-    .flags = BUZZER_PWM_FLAGS,
-};
+static const struct pwm_dt_spec buzzer_pwm = PWM_DT_SPEC_GET(BUZZER_NODE);
 static const note_t *current_melody = NULL;
 static uint32_t melody_length = 0;
 static uint32_t current_index = 0;
@@ -46,7 +23,7 @@ static bool melody_loop = false;
 static struct k_timer melody_timer;
 static struct k_timer advertising_beep_timer;
 static bool is_advertising_beep_active = false;
-static bool keypress_beep_enabled = false;
+static bool keypress_beep_enabled = true;
 
 // BLE profile change melody (ascending tones)
 const note_t ble_profile_change[] = {
@@ -98,7 +75,7 @@ const note_t warning[] = {
 void buzzer_beep(uint32_t freq_hz, uint32_t duration_ms)
 {
 
-    if (buzzer_pwm.dev == NULL || !device_is_ready(buzzer_pwm.dev)) {
+    if (!device_is_ready(buzzer_pwm.dev)) {
 		    LOG_INF("========================================");
 			LOG_INF("PWM BUZZER not ready!!");
 		    LOG_INF("========================================");
@@ -109,17 +86,12 @@ void buzzer_beep(uint32_t freq_hz, uint32_t duration_ms)
 
     pwm_set_dt(&buzzer_pwm, period_ns, period_ns / 2);  // 50% duty
     k_msleep(duration_ms);
-//    pwm_set_dt(&buzzer_pwm, 0, 0);  // off
-	pwm_set_dt(&buzzer_pwm, period_ns, 0);   // off
+	// off
+	pwm_set_dt(&buzzer_pwm, 0, 0);
 }
 
 static void melody_timer_callback(struct k_timer *timer)
 {
-    if (buzzer_pwm.dev == NULL || !device_is_ready(buzzer_pwm.dev)) {
-        buzzer_stop_melody();
-        return;
-    }
-
     if (current_index >= melody_length) {
         if (melody_loop) {
             current_index = 0;
@@ -156,9 +128,7 @@ void buzzer_play_melody(const note_t *melody, uint32_t length, bool loop)
 void buzzer_stop_melody(void)
 {
     k_timer_stop(&melody_timer);
-    if (buzzer_pwm.dev != NULL && device_is_ready(buzzer_pwm.dev)) {
-        pwm_set_dt(&buzzer_pwm, 0, 0);
-    }
+    pwm_set_dt(&buzzer_pwm, 0, 0);
     current_melody = NULL;
 }
 
@@ -221,8 +191,8 @@ static int buzzer_init(void)
 {
     LOG_INF("========================================");
     LOG_INF("BUZZER MODULE INITIALIZED");
-    if (buzzer_pwm.dev == NULL || !device_is_ready(buzzer_pwm.dev)) {
-        LOG_INF("PWM Device NOT READY! (pwms=%d)", BUZZER_HAS_PWMS);
+    if (!device_is_ready(buzzer_pwm.dev)) {
+        LOG_INF("PWM Device NOT READY!");
         return -ENODEV;
     }
     LOG_INF("PWM Device: %s", buzzer_pwm.dev->name);
