@@ -5,6 +5,10 @@ if SHIELD_TITAN8000
 
 config TITAN8000_BUZZER
 	bool "Enable buzzer support for Titan8000"
+	depends on BOARD_SEEEDUINO_XIAO_BLE
+	select PWM
+	select PWM_NRFX
+	select NRFX_PWM0
 	default y if BOARD_SEEEDUINO_XIAO_BLE
 	default n
 	help
