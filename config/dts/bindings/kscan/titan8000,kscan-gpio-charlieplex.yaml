@@ -1,3 +1,4 @@
+# Copyright (c) 2025 monksoffunk
 # SPDX-License-Identifier: MIT
 
 description: GPIO keyboard charlieplex matrix controller (Titan8000 custom)

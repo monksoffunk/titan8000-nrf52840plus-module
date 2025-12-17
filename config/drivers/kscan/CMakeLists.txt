@@ -1,3 +1,4 @@
+# Copyright (c) 2025 monksoffunk
 # SPDX-License-Identifier: MIT
 
 # Amend the existing kscan drivers library to add an extra driver.

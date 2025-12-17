@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2020-2023 The ZMK Contributors
+ * Copyright (c) 2025 monksoffunk
  *
  * SPDX-License-Identifier: MIT
  */
