@@ -1,0 +1,6 @@
+name: zmk-driver-titan8000-kscan
+build:
+  cmake: .
+  settings:
+    board_root: ..
+    dts_root: .

@@ -2,6 +2,7 @@
 .west/
 modules/
 zephyr/
+!config/zephyr/
 zmk/
 bootloader/
 tools/

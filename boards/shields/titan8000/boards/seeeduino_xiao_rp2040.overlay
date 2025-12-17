@@ -19,3 +19,7 @@
 &i2c1 {
     status = "disabled";
 };
+
+&kscan0 {
+    discharge-before-inputs-us = <100>;
+};

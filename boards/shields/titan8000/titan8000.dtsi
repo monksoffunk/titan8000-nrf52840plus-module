@@ -3,7 +3,7 @@
 
 / {
 	kscan0: kscan {
-		compatible = "zmk,kscan-gpio-charlieplex";
+		compatible = "titan8000,kscan-gpio-charlieplex";
 		wakeup-source;
 		
 		interrupt-gpios = <&xiao_d 10 (GPIO_ACTIVE_HIGH | GPIO_PULL_DOWN) >;
