@@ -263,10 +263,14 @@ static int kscan_charlieplex_read(const struct device *dev) {
         return err;
     }
 
-    // Scan the matrix.
-    for (int row = 0; row < config->cells.len; row++) {
+    /*
+     * Inverted scan (custom): choose one C (column) pin, drive it ACTIVE (expected LOW via
+     * GPIO_ACTIVE_LOW), read all other pins as inputs w/ pull-ups.
+     */
+    for (int col = 0; col < config->cells.len; col++) {
         if (config->discharge_before_inputs_us > 0) {
-            err = kscan_charlieplex_set_all_outputs(dev, 0);
+            /* Drive all pins active (LOW) briefly to discharge floating capacitances. */
+            err = kscan_charlieplex_set_all_outputs(dev, 1);
             if (err) {
                 return err;
             }
@@ -279,7 +283,7 @@ static int kscan_charlieplex_read(const struct device *dev) {
             }
         }
 
-        const struct gpio_dt_spec *out_gpio = &config->cells.gpios[row];
+        const struct gpio_dt_spec *out_gpio = &config->cells.gpios[col];
         err = kscan_charlieplex_set_as_output(out_gpio);
         if (err) {
             return err;
@@ -289,15 +293,16 @@ static int kscan_charlieplex_read(const struct device *dev) {
         k_busy_wait(CONFIG_ZMK_KSCAN_CHARLIEPLEX_WAIT_BEFORE_INPUTS);
 #endif
 
-        for (int col = 0; col < config->cells.len; col++) {
-            if (col == row) {
+        for (int row = 0; row < config->cells.len; row++) {
+            if (row == col) {
                 continue;
             }
 
-            const struct gpio_dt_spec *in_gpio = &config->cells.gpios[col];
+            const struct gpio_dt_spec *in_gpio = &config->cells.gpios[row];
             const int index = state_index(config, row, col);
 
             struct zmk_debounce_state *state = &data->charlieplex_state[index];
+            /* gpio_pin_get_dt() returns 1 when pin is in its ACTIVE state. */
             zmk_debounce_update(state, gpio_pin_get_dt(in_gpio), config->debounce_scan_period_ms,
                                 &config->debounce_config);
 
