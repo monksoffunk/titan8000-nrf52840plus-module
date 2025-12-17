@@ -14,22 +14,8 @@ LOG_MODULE_REGISTER(buzzer, CONFIG_ZMK_LOG_LEVEL);
 #ifdef CONFIG_TITAN8000_BUZZER
 
 #define BUZZER_NODE DT_CHILD(DT_PATH(buzzers), buzzer)
-
-#define BUZZER_PWM_CTLR DT_PWMS_CTLR_BY_IDX(BUZZER_NODE, 0)
-
-#if IS_ENABLED(CONFIG_PWM_NRFX) && DT_NODE_HAS_STATUS(BUZZER_PWM_CTLR, okay)
-#define BUZZER_PWM_DEV DEVICE_DT_GET(BUZZER_PWM_CTLR)
-#else
-#define BUZZER_PWM_DEV NULL
-#endif
-
 // Buzzer implementation (only compiled when CONFIG_TITAN8000_BUZZER is enabled)
-static const struct pwm_dt_spec buzzer_pwm = {
-    .dev = BUZZER_PWM_DEV,
-    .channel = DT_PWMS_CHANNEL_BY_IDX(BUZZER_NODE, 0),
-    .period = DT_PWMS_PERIOD_BY_IDX(BUZZER_NODE, 0),
-    .flags = DT_PWMS_FLAGS_BY_IDX(BUZZER_NODE, 0),
-};
+static const struct pwm_dt_spec buzzer_pwm = PWM_DT_SPEC_GET(BUZZER_NODE);
 static const note_t *current_melody = NULL;
 static uint32_t melody_length = 0;
 static uint32_t current_index = 0;
@@ -37,7 +23,7 @@ static bool melody_loop = false;
 static struct k_timer melody_timer;
 static struct k_timer advertising_beep_timer;
 static bool is_advertising_beep_active = false;
-static bool keypress_beep_enabled = true;
+static bool keypress_beep_enabled = false;
 
 // BLE profile change melody (ascending tones)
 const note_t ble_profile_change[] = {
@@ -89,7 +75,8 @@ const note_t warning[] = {
 void buzzer_beep(uint32_t freq_hz, uint32_t duration_ms)
 {
 
-    if (buzzer_pwm.dev == NULL || !device_is_ready(buzzer_pwm.dev)) {
+
+    if (!device_is_ready(buzzer_pwm.dev)) {
 		    LOG_INF("========================================");
 			LOG_INF("PWM BUZZER not ready!!");
 		    LOG_INF("========================================");
@@ -205,7 +192,7 @@ static int buzzer_init(void)
 {
     LOG_INF("========================================");
     LOG_INF("BUZZER MODULE INITIALIZED");
-    if (buzzer_pwm.dev == NULL || !device_is_ready(buzzer_pwm.dev)) {
+    if (!device_is_ready(buzzer_pwm.dev)) {
         LOG_INF("PWM Device NOT READY!");
         return -ENODEV;
     }
