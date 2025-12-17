@@ -108,8 +108,9 @@ static int kscan_charlieplex_set_as_input(const struct gpio_dt_spec *gpio) {
         return -ENODEV;
     }
 
-    /* Inverted scan: inputs use pull-ups and a pressed key reads low. */
-    int err = gpio_pin_configure_dt(gpio, GPIO_INPUT | GPIO_PULL_UP);
+    const gpio_flags_t pull_flag =
+        ((gpio->dt_flags & GPIO_ACTIVE_LOW) == GPIO_ACTIVE_LOW) ? GPIO_PULL_UP : GPIO_PULL_DOWN;
+    int err = gpio_pin_configure_dt(gpio, GPIO_INPUT | pull_flag);
     if (err) {
         LOG_ERR("Unable to configure pin %u on %s for input", gpio->pin, gpio->port->name);
         return err;
@@ -129,10 +130,11 @@ static int kscan_charlieplex_set_as_output(const struct gpio_dt_spec *gpio) {
         return err;
     }
 
-    /* Inverted scan: drive the selected pin low (physical low). */
-    err = gpio_pin_set(gpio->port, gpio->pin, 0);
+    const int active_level =
+        ((gpio->dt_flags & GPIO_ACTIVE_LOW) == GPIO_ACTIVE_LOW) ? 0 : 1;
+    err = gpio_pin_set(gpio->port, gpio->pin, active_level);
     if (err) {
-        LOG_ERR("Failed to drive output pin %u low: %i", gpio->pin, err);
+        LOG_ERR("Failed to drive output pin %u active: %i", gpio->pin, err);
     }
 
     return err;
@@ -212,7 +214,10 @@ static int kscan_charlieplex_interrupt_enable(const struct device *dev) {
         return err;
     }
 
-    return kscan_charlieplex_set_all_outputs(dev, 1);
+    const struct kscan_charlieplex_config *config = dev->config;
+    const int active_level =
+        ((config->cells.gpios[0].dt_flags & GPIO_ACTIVE_LOW) == GPIO_ACTIVE_LOW) ? 0 : 1;
+    return kscan_charlieplex_set_all_outputs(dev, active_level);
 }
 
 static void kscan_charlieplex_irq_callback(const struct device *port, struct gpio_callback *cb,
@@ -307,7 +312,9 @@ static int kscan_charlieplex_read(const struct device *dev) {
             }
 
             struct zmk_debounce_state *state = &data->charlieplex_state[index];
-            const bool active = (read_value == 0);
+            const bool active_low =
+                ((in_gpio->dt_flags & GPIO_ACTIVE_LOW) == GPIO_ACTIVE_LOW);
+            const bool active = active_low ? (read_value == 0) : (read_value != 0);
             zmk_debounce_update(state, active, config->debounce_scan_period_ms,
                                 &config->debounce_config);
 

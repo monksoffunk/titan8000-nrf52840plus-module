@@ -6,7 +6,7 @@
 		compatible = "titan8000,kscan-gpio-charlieplex";
 		wakeup-source;
 		
-		interrupt-gpios = <&xiao_d 10 (GPIO_ACTIVE_HIGH | GPIO_PULL_DOWN) >;
+		interrupt-gpios = <&xiao_d 10 (GPIO_ACTIVE_LOW | GPIO_PULL_UP) >;
 
 		debounce-press-ms = <50>;
 		debounce-release-ms = <50>;
@@ -15,16 +15,16 @@
 
 		status = "okay";
         gpios
-	      = <&xiao_d 0 (GPIO_ACTIVE_HIGH | GPIO_PULL_DOWN)>
-		  , <&xiao_d 1 (GPIO_ACTIVE_HIGH | GPIO_PULL_DOWN)>
-		  , <&xiao_d 2 (GPIO_ACTIVE_HIGH | GPIO_PULL_DOWN)>
-		  , <&xiao_d 3 (GPIO_ACTIVE_HIGH | GPIO_PULL_DOWN)>
-		  , <&xiao_d 4 (GPIO_ACTIVE_HIGH | GPIO_PULL_DOWN)>
-		  , <&xiao_d 5 (GPIO_ACTIVE_HIGH | GPIO_PULL_DOWN)>
-		  , <&xiao_d 6 (GPIO_ACTIVE_HIGH | GPIO_PULL_DOWN)>
-		  , <&xiao_d 7 (GPIO_ACTIVE_HIGH | GPIO_PULL_DOWN)>
-		  , <&xiao_d 8 (GPIO_ACTIVE_HIGH | GPIO_PULL_DOWN)>
-		  , <&xiao_d 9 (GPIO_ACTIVE_HIGH | GPIO_PULL_DOWN)>;
+	      = <&xiao_d 0 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>
+		  , <&xiao_d 1 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>
+		  , <&xiao_d 2 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>
+		  , <&xiao_d 3 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>
+		  , <&xiao_d 4 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>
+		  , <&xiao_d 5 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>
+		  , <&xiao_d 6 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>
+		  , <&xiao_d 7 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>
+		  , <&xiao_d 8 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>
+		  , <&xiao_d 9 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>;
 	};
 
 	default_transform: keymap_transform_0 {
