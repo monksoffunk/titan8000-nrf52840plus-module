@@ -23,14 +23,14 @@ LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 #define INST_LEN(n) DT_INST_PROP_LEN(n, gpios)
 #define INST_CHARLIEPLEX_LEN(n) (INST_LEN(n) * INST_LEN(n))
 
-#if CONFIG_ZMK_KSCAN_DEBOUNCE_PRESS_MS >= 0
+#if defined(CONFIG_ZMK_KSCAN_DEBOUNCE_PRESS_MS) && (CONFIG_ZMK_KSCAN_DEBOUNCE_PRESS_MS >= 0)
 #define INST_DEBOUNCE_PRESS_MS(n) CONFIG_ZMK_KSCAN_DEBOUNCE_PRESS_MS
 #else
 #define INST_DEBOUNCE_PRESS_MS(n)                                                                  \
     DT_INST_PROP_OR(n, debounce_period, DT_INST_PROP(n, debounce_press_ms))
 #endif
 
-#if CONFIG_ZMK_KSCAN_DEBOUNCE_RELEASE_MS >= 0
+#if defined(CONFIG_ZMK_KSCAN_DEBOUNCE_RELEASE_MS) && (CONFIG_ZMK_KSCAN_DEBOUNCE_RELEASE_MS >= 0)
 #define INST_DEBOUNCE_RELEASE_MS(n) CONFIG_ZMK_KSCAN_DEBOUNCE_RELEASE_MS
 #else
 #define INST_DEBOUNCE_RELEASE_MS(n)                                                                \
