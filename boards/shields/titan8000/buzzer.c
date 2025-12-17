@@ -21,14 +21,16 @@ LOG_MODULE_REGISTER(buzzer, CONFIG_ZMK_LOG_LEVEL);
  * DT_PWMS_* macros require the 'pwms' property to exist.
  * Use COND_CODE_1() to avoid expanding those macros when absent.
  */
-#define BUZZER_PWM_CTLR_NODE COND_CODE_1(BUZZER_HAS_PWMS, (DT_PWMS_CTLR_BY_IDX(BUZZER_NODE, 0)), (DT_INVALID_NODE))
-#define BUZZER_PWM_CTLR_OK DT_NODE_HAS_STATUS(BUZZER_PWM_CTLR_NODE, okay)
-#define BUZZER_HAS_PWM_DEV UTIL_AND(BUZZER_HAS_PWMS, BUZZER_PWM_CTLR_OK)
+#define BUZZER_PWM_CTLR_NODE DT_PWMS_CTLR_BY_IDX(BUZZER_NODE, 0)
 
-#define BUZZER_PWM_DEV COND_CODE_1(BUZZER_HAS_PWM_DEV, (DEVICE_DT_GET(BUZZER_PWM_CTLR_NODE)), (NULL))
-#define BUZZER_PWM_CHANNEL COND_CODE_1(BUZZER_HAS_PWM_DEV, (DT_PWMS_CHANNEL_BY_IDX(BUZZER_NODE, 0)), (0))
-#define BUZZER_PWM_PERIOD COND_CODE_1(BUZZER_HAS_PWM_DEV, (DT_PWMS_PERIOD_BY_IDX(BUZZER_NODE, 0)), (0))
-#define BUZZER_PWM_FLAGS COND_CODE_1(BUZZER_HAS_PWM_DEV, (DT_PWMS_FLAGS_BY_IDX(BUZZER_NODE, 0)), (0))
+/*
+ * DEVICE_DT_GET_OR_NULL() returns NULL unless controller status is okay.
+ * This avoids compile-time failures when the controller exists but is disabled.
+ */
+#define BUZZER_PWM_DEV COND_CODE_1(BUZZER_HAS_PWMS, (DEVICE_DT_GET_OR_NULL(BUZZER_PWM_CTLR_NODE)), (NULL))
+#define BUZZER_PWM_CHANNEL COND_CODE_1(BUZZER_HAS_PWMS, (DT_PWMS_CHANNEL_BY_IDX(BUZZER_NODE, 0)), (0))
+#define BUZZER_PWM_PERIOD COND_CODE_1(BUZZER_HAS_PWMS, (DT_PWMS_PERIOD_BY_IDX(BUZZER_NODE, 0)), (0))
+#define BUZZER_PWM_FLAGS COND_CODE_1(BUZZER_HAS_PWMS, (DT_PWMS_FLAGS_BY_IDX(BUZZER_NODE, 0)), (0))
 
 // Buzzer implementation (only compiled when CONFIG_TITAN8000_BUZZER is enabled)
 static const struct pwm_dt_spec buzzer_pwm = {
@@ -220,7 +222,7 @@ static int buzzer_init(void)
     LOG_INF("========================================");
     LOG_INF("BUZZER MODULE INITIALIZED");
     if (buzzer_pwm.dev == NULL || !device_is_ready(buzzer_pwm.dev)) {
-        LOG_INF("PWM Device NOT READY!");
+        LOG_INF("PWM Device NOT READY! (pwms=%d)", BUZZER_HAS_PWMS);
         return -ENODEV;
     }
     LOG_INF("PWM Device: %s", buzzer_pwm.dev->name);
