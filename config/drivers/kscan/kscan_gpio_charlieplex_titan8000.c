@@ -212,8 +212,12 @@ static int kscan_charlieplex_interrupt_enable(const struct device *dev) {
         return err;
     }
 
-    // While interrupts are enabled, set all outputs active so an pressed key will trigger
-    return kscan_charlieplex_set_all_outputs(dev, 1);
+    /*
+     * While waiting for interrupts, drive all matrix lines to physical HIGH.
+     * For ACTIVE_LOW pins, gpio_pin_set_dt(..., 0) drives the line HIGH.
+     * This matches the "D0-D9 high, IRQ on D10 active high" wiring model.
+     */
+    return kscan_charlieplex_set_all_outputs(dev, 0);
 }
 
 static void kscan_charlieplex_irq_callback(const struct device *port, struct gpio_callback *cb,

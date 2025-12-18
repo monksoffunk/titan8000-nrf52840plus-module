@@ -8,12 +8,13 @@
 /*
  * Xiao BLE uses the Titan8000 custom kscan driver.
  *
- * Interrupt-driven scanning is intentionally disabled for now.
- * When `interrupt-gpios` is present, the driver switches to interrupt mode and
- * stops polling while idle. If the chosen interrupt line is not reliably wired
- * to key activity, the matrix will appear to “not work” after boot.
+ * Interrupt model (official-style):
+ * - Use a single interrupt line (D10) with ACTIVE HIGH detection.
+ * - While waiting for interrupts, the driver drives D0-D9 to physical HIGH so a
+ *   key press can propagate to D10 via the diode network.
+ * - When scanning, the driver uses ACTIVE LOW logic for key detection.
  */
 &kscan0 {
 	wakeup-source;
-	interrupt-gpios = <&xiao_d 10 (GPIO_ACTIVE_HIGH | GPIO_PULL_DOWN) >;
+	interrupt-gpios = <&xiao_d 10 (GPIO_ACTIVE_HIGH | GPIO_PULL_DOWN)>;
 };
