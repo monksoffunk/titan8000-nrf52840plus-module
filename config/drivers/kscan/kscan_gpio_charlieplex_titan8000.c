@@ -267,12 +267,8 @@ static void kscan_charlieplex_irq_callback(const struct device *port, struct gpi
     /* Release the idle drive as soon as we get the IRQ to minimize transients. */
     (void)kscan_charlieplex_set_all_as_input(data->dev);
 
-    /*
-     * Allow the matrix to settle after changing pin directions before the first scan.
-     * Using a delayed work item avoids busy-waiting in interrupt context.
-     */
-    data->scan_time = k_uptime_get() + 1;
-    k_work_reschedule(&data->work, K_TIMEOUT_ABS_MS(data->scan_time));
+    data->scan_time = k_uptime_get();
+    k_work_reschedule(&data->work, K_NO_WAIT);
 }
 
 static void kscan_charlieplex_read_continue(const struct device *dev) {
