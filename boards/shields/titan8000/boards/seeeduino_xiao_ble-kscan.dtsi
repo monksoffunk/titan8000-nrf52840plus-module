@@ -10,8 +10,8 @@
  *
  * Interrupt model (official-style):
  * - Use a single interrupt line (D10) with ACTIVE HIGH detection.
- * - While waiting for interrupts, the driver biases D0-D9 to physical HIGH using
- *   input pull-ups so a key press can propagate to D10 via the diode network.
+ * - While waiting for interrupts, the driver drives D0-D9 to physical HIGH so a
+ *   key press can propagate to D10 via the diode network.
  * - When scanning, the driver uses ACTIVE LOW logic for key detection.
  */
 &kscan0 {
