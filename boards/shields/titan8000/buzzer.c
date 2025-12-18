@@ -97,7 +97,7 @@ void buzzer_beep(uint32_t freq_hz, uint32_t duration_ms)
 
 static void buzzer_pitch_fall_quadratic(const struct pwm_dt_spec *pwm, uint32_t freq_start, uint32_t freq_end)
 {
-    const uint32_t duration_ms = 50;
+    const uint32_t duration_ms = 100;
     const uint32_t step_ms = 1;
     const uint32_t steps = duration_ms / step_ms;
 
