@@ -95,28 +95,33 @@ void buzzer_beep(uint32_t freq_hz, uint32_t duration_ms)
 	pwm_set_dt(&buzzer_pwm, 0, 0);
 }
 
-static void buzzer_pitch_fall_quadratic(const struct pwm_dt_spec *pwm, uint32_t freq_start, uint32_t freq_end)
-{
-    const uint32_t duration_ms = 100;
-    const uint32_t step_ms = 1;
+static void buzzer_fall_quadratic_hz(
+    const struct pwm_dt_spec *pwm,
+    uint32_t f_start_hz,
+    uint32_t f_end_hz,
+    uint32_t duration_ms
+) {
+    const uint32_t step_ms = 5;                    // 5ms刻み（ZMKでも現実的）
     const uint32_t steps = duration_ms / step_ms;
+    if (steps == 0) return;
 
     for (uint32_t i = 0; i <= steps; i++) {
-        float t = (float)i / (float)steps;   // 0.0 → 1.0
-        float factor = 1.0f - (t * t);        // 二次関数
+        // t = i/steps, curve = t^2 (0->1)
+        // freq = f_start - (f_start-f_end)*t^2
+        uint32_t num = i * i;                      // i^2
+        uint32_t den = steps * steps;              // steps^2
+        uint32_t df  = f_start_hz - f_end_hz;
 
-        float freq =
-            (float)freq_end +
-            ((float)freq_start - (float)freq_end) * factor;
+        uint32_t f = f_start_hz - (df * num) / den;
 
-        uint32_t period_us = (uint32_t)(1000000.0f / freq);
-        uint32_t pulse_us  = period_us / 2;
+        // period in nanoseconds
+        uint32_t period_ns = 1000000000UL / f;
+        uint32_t pulse_ns  = period_ns / 2;
 
-        pwm_set_dt(pwm, period_us, pulse_us);
+        pwm_set_dt(pwm, period_ns, pulse_ns);
         k_sleep(K_MSEC(step_ms));
     }
 
-    // 停止
     pwm_set_dt(pwm, 0, 0);
 }
 
@@ -184,7 +189,7 @@ void buzzer_toggle_keypress_beep(void)
 
 void buzzer_pitch_fall() 
 {
-    buzzer_pitch_fall_quadratic(&buzzer_pwm, 4000, 1500);
+    buzzer_pitch_fall_quadratic(&buzzer_pwm, 4000, 1500、200);
 }
 
 bool buzzer_is_keypress_beep_enabled(void)
