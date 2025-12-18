@@ -206,8 +206,38 @@ static int kscan_charlieplex_interrupt_configure(const struct device *dev,
     return 0;
 }
 
+static int kscan_charlieplex_interrupt_line_drive_high(const struct device *dev) {
+    const struct kscan_charlieplex_config *config = dev->config;
+    const struct gpio_dt_spec *gpio = &config->interrupt;
+
+    if (!device_is_ready(gpio->port)) {
+        LOG_ERR("GPIO is not ready: %s", gpio->port->name);
+        return -ENODEV;
+    }
+
+    int err = gpio_pin_configure(gpio->port, gpio->pin, GPIO_OUTPUT_HIGH);
+    if (err) {
+        LOG_ERR("Unable to configure interrupt pin %u on %s for output high", gpio->pin,
+                gpio->port->name);
+        return err;
+    }
+
+    return 0;
+}
+
+static int kscan_charlieplex_interrupt_line_input_pulldown(const struct device *dev) {
+    const struct kscan_charlieplex_config *config = dev->config;
+    return kscan_charlieplex_set_as_input(&config->interrupt);
+}
+
 static int kscan_charlieplex_interrupt_enable(const struct device *dev) {
-    int err = kscan_charlieplex_interrupt_configure(dev, GPIO_INT_LEVEL_ACTIVE);
+    /* Restore the interrupt line (D10) to input w/ pulldown before enabling the level IRQ. */
+    int err = kscan_charlieplex_interrupt_line_input_pulldown(dev);
+    if (err) {
+        return err;
+    }
+
+    err = kscan_charlieplex_interrupt_configure(dev, GPIO_INT_LEVEL_ACTIVE);
     if (err) {
         return err;
     }
@@ -227,6 +257,12 @@ static void kscan_charlieplex_irq_callback(const struct device *port, struct gpi
 
     /* Disable our interrupt to avoid re-entry while we scan. */
     kscan_charlieplex_interrupt_configure(data->dev, GPIO_INT_DISABLE);
+
+    /*
+     * Once the IRQ fires, drive the interrupt line high so its pulldown does not load the
+     * charlieplex network during scanning (can cause ghost/false readings).
+     */
+    (void)kscan_charlieplex_interrupt_line_drive_high(data->dev);
 
     /* Release the idle drive as soon as we get the IRQ to minimize transients. */
     (void)kscan_charlieplex_set_all_as_input(data->dev);
