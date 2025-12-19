@@ -53,8 +53,8 @@ static const uint8_t decay_lut[] = {
 // BLE profile change melody (ascending tones)
 const note_t ble_profile_change[] = {
     {NOTE_C6, 170},
-    {NOTE_E6, 140},
-    {NOTE_G6, 170}
+//    {NOTE_E6, 140},
+//    {NOTE_G6, 170}
 };
 
 // BLE bond clear melody (descending tones)
@@ -504,7 +504,7 @@ static int buzzer_init(void)
     k_work_init_delayable(&melody_work, melody_work_handler);
     k_timer_init(&advertising_beep_timer, advertising_beep_callback, NULL);
 
-    buzzer_play_melody_ex(success, ARRAY_SIZE(success), false, buzzer_voice_soft);
+    buzzer_play_melody_ex(success, ARRAY_SIZE(success), false, buzzer_voice_ad);
 
     return 0;
 }
@@ -542,12 +542,12 @@ static int buzzer_ble_profile_listener(const zmk_event_t *eh)
     // Check if the profile is open (no bond) - likely a clear operation
     if (zmk_ble_profile_is_open(ev->index)) {
         LOG_INF("Profile is open (cleared)");
-        buzzer_play_melody_ex(ble_bond_clear, sizeof(ble_bond_clear) / sizeof(note_t), false, buzzer_voice_soft); 
+        buzzer_play_melody_ex(ble_bond_clear, sizeof(ble_bond_clear) / sizeof(note_t), false, buzzer_voice_ad); 
         // Start advertising beep after clearing
         start_advertising_beep();
     } else {
         LOG_INF("Profile switched");
-        buzzer_play_melody_ex(ble_profile_change, sizeof(ble_profile_change) / sizeof(note_t), false, buzzer_voice_soft);
+        buzzer_play_melody_ex(ble_profile_change, sizeof(ble_profile_change) / sizeof(note_t), false, buzzer_voice_ad);
         
         // Check if connected, if not start advertising beep
         if (!zmk_ble_active_profile_is_connected()) {
