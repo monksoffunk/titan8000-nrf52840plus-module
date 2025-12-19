@@ -52,16 +52,16 @@ static const uint8_t decay_lut[] = {
 
 // BLE profile change melody (ascending tones)
 const note_t ble_profile_change[] = {
-    {NOTE_C7, 170},
-    {NOTE_E7, 140},
-    {NOTE_G7, 170}
+    {NOTE_C7, 140},
+    {NOTE_E7, 100},
+    {NOTE_G7, 140}
 };
 
 // BLE bond clear melody (descending tones)
 const note_t ble_bond_clear[] = {
-    {NOTE_G7, 80},
-    {NOTE_E7, 80},
-    {NOTE_C7, 120}
+    {NOTE_G7, 140},
+    {NOTE_E7, 100},
+    {NOTE_C7, 140}
 };
 
 // BLE all bonds clear melody (warning sound)
@@ -469,7 +469,7 @@ static void start_advertising_beep(void)
         k_timer_start(&advertising_beep_timer, K_SECONDS(3), K_SECONDS(3));
         LOG_INF("Advertising beep started");
     }
-}
+}。。。
 
 static void stop_advertising_beep(void)
 {
