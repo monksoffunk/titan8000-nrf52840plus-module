@@ -148,10 +148,11 @@ static void buzzer_beep_ad(
 
     /* ---------- Decay ---------- */
     uint32_t decay_steps = decay_ms / step_ms;
-    if (decay_steps == 0) decay_steps = 1;
-
     for (uint32_t i = 0; i <= decay_steps; i++) {
-        uint32_t pulse = max_pulse - (max_pulse * i) / decay_steps;
+        float t = (float)i / (float)decay_steps;   // 0..1
+        float factor = expf(-4.0f * t);             // 4.0 decay speed
+
+        uint32_t pulse = (uint32_t)(max_pulse * factor);
         pwm_set_dt(pwm, period_ns, pulse);
         k_sleep(K_MSEC(step_ms));
     }
@@ -298,7 +299,7 @@ static int buzzer_keypress_listener(const zmk_event_t *eh)
     //    buzzer_beep(4000, 50);  // 4kHz, 50ms
     //    buzzer_pitch_fall();
         buzzer_beep_ad(&buzzer_pwm,
-               3000,   // 3kHz
+               4000,   // 3kHz
                10,     // Attack 10ms
                60);    // Decay 60ms
     }
