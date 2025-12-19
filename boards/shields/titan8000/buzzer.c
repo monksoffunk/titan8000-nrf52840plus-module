@@ -125,6 +125,41 @@ static void buzzer_fall_quadratic_hz(
     pwm_set_dt(pwm, 0, 0);
 }
 
+static void buzzer_beep_ad(
+    const struct pwm_dt_spec *pwm,
+    uint32_t freq_hz,
+    uint32_t attack_ms,
+    uint32_t decay_ms
+) {
+    const uint32_t step_ms = 2;
+
+    const uint32_t period_ns = 1000000000UL / freq_hz;
+    const uint32_t max_pulse = period_ns / 2;   // 50% duty
+
+    /* ---------- Attack ---------- */
+    uint32_t attack_steps = attack_ms / step_ms;
+    if (attack_steps == 0) attack_steps = 1;
+
+    for (uint32_t i = 0; i <= attack_steps; i++) {
+        uint32_t pulse = (max_pulse * i) / attack_steps;
+        pwm_set_dt(pwm, period_ns, pulse);
+        k_sleep(K_MSEC(step_ms));
+    }
+
+    /* ---------- Decay ---------- */
+    uint32_t decay_steps = decay_ms / step_ms;
+    if (decay_steps == 0) decay_steps = 1;
+
+    for (uint32_t i = 0; i <= decay_steps; i++) {
+        uint32_t pulse = max_pulse - (max_pulse * i) / decay_steps;
+        pwm_set_dt(pwm, period_ns, pulse);
+        k_sleep(K_MSEC(step_ms));
+    }
+
+    /* Stop */
+    pwm_set_dt(pwm, 0, 0);
+}
+
 static void melody_timer_callback(struct k_timer *timer)
 {
     if (current_index >= melody_length) {
@@ -261,7 +296,11 @@ static int buzzer_keypress_listener(const zmk_event_t *eh)
     if (ev->state && keypress_beep_enabled) {
         LOG_INF("KEY PRESSED at position %d", ev->position);
     //    buzzer_beep(4000, 50);  // 4kHz, 50ms
-        buzzer_pitch_fall();
+    //    buzzer_pitch_fall();
+        buzzer_beep_ad(&buzzer_pwm,
+               3000,   // 3kHz
+               10,     // Attack 10ms
+               60);    // Decay 60ms
     }
 
     return ZMK_EV_EVENT_BUBBLE;
