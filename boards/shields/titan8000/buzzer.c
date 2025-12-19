@@ -52,9 +52,9 @@ static const uint8_t decay_lut[] = {
 
 // BLE profile change melody (ascending tones)
 const note_t ble_profile_change[] = {
-    {NOTE_C6, 80},
-    {NOTE_E6, 80},
-    {NOTE_G6, 120}
+    {NOTE_C6, 170},
+    {NOTE_E6, 140},
+    {NOTE_G6, 170}
 };
 
 // BLE bond clear melody (descending tones)
@@ -482,7 +482,7 @@ static int buzzer_ble_profile_listener(const zmk_event_t *eh)
     // Check if the profile is open (no bond) - likely a clear operation
     if (zmk_ble_profile_is_open(ev->index)) {
         LOG_INF("Profile is open (cleared)");
-        buzzer_play_melody(ble_bond_clear, sizeof(ble_bond_clear) / sizeof(note_t), false);
+        buzzer_play_melody(ble_bond_clear, sizeof(ble_bond_clear) / sizeof(note_t), false); 
         // Start advertising beep after clearing
         start_advertising_beep();
     } else {
