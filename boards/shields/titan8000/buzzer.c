@@ -397,7 +397,7 @@ static int buzzer_keypress_listener(const zmk_event_t *eh)
     // Only play sound when the key is pressed (do not play when released)
     if (ev->state && keypress_beep_enabled) {
         LOG_INF("KEY PRESSED at position %d", ev->position);
-        buzzer_request(buzzer_voice_ad, 4000, 70);
+        buzzer_request(buzzer_voice_ad, 4000, 150);
     }
 
     return ZMK_EV_EVENT_BUBBLE;
