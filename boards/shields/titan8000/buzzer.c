@@ -252,7 +252,7 @@ static void melody_work_handler(struct k_work *work)
 
         const note_t *note = &current_melody[current_index++];
 
-        if (node->freq == NOTE_REST) {
+        if (note->freq == NOTE_REST) {
             pwm_set_dt(&buzzer_pwm, 0, 0);
             k_msleep(note->duration);
             continue;
