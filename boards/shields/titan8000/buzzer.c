@@ -469,7 +469,7 @@ static void start_advertising_beep(void)
         k_timer_start(&advertising_beep_timer, K_SECONDS(3), K_SECONDS(3));
         LOG_INF("Advertising beep started");
     }
-}。。。
+}
 
 static void stop_advertising_beep(void)
 {
