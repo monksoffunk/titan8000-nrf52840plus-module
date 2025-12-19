@@ -75,9 +75,9 @@ const note_t ble_all_bonds_clear[] = {
 
 // BLE disconnect melody (short beep)
 const note_t ble_disconnect[] = {
-    {NOTE_E7, 100},
-    {NOTE_REST, 50},
-    {NOTE_C7, 100}
+    {NOTE_E7, 140},
+    {NOTE_REST, 100},
+    {NOTE_C7, 140}
 };
 
 // BLE advertising beep (repeating pip-pip)
@@ -88,7 +88,7 @@ const note_t ble_advertising_beep[] = {
 };
 
 const note_t success[] = {
-    {NOTE_E7, 80}, {NOTE_B7, 80}, {NOTE_E8, 400},
+    {NOTE_E7, 140}, {NOTE_B7, 140}, {NOTE_E8, 400},
 };
 
 const note_t warning[] = {
