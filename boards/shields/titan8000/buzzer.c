@@ -242,7 +242,7 @@ static void melody_work_handler(struct k_work *work)
     }
 
     while (current_melody) {
-        if (current_index => melody_length) {
+        if (current_index >= melody_length) {
             if (melody_loop) {
                 current_index = 0;
             } else {
