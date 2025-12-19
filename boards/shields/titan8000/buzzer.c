@@ -17,7 +17,7 @@
 
 LOG_MODULE_REGISTER(buzzer, CONFIG_ZMK_LOG_LEVEL);
 
-#ifdef CONFIG_TITAN8000_BUZZE
+#ifdef CONFIG_TITAN8000_BUZZER
 
 #define BUZZER_NODE DT_CHILD(DT_PATH(buzzers), buzzer)
 // Buzzer implementation (only compiled when CONFIG_TITAN8000_BUZZER is enabled)
