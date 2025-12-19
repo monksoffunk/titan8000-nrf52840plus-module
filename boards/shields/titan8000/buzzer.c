@@ -30,6 +30,7 @@ static struct k_timer melody_timer;
 static struct k_timer advertising_beep_timer;
 static bool is_advertising_beep_active = false;
 static bool keypress_beep_enabled = false;
+static buzzer_voice_fn_t current_voice = buzzer_voice_plain;
 
 // BLE profile change melody (ascending tones)
 const note_t ble_profile_change[] = {
@@ -95,6 +96,18 @@ void buzzer_beep(uint32_t freq_hz, uint32_t duration_ms)
 	pwm_set_dt(&buzzer_pwm, 0, 0);
 }
 
+static void buzzer_voice_plain(
+    const struct pwm_dt_spec *pwm,
+    uint32_t freq_hz,
+    uint32_t duration_ms
+)
+{
+    uint32_t period_ns = 1000000000UL / freq_hz;
+    pwm_set_dt(pwm, period_ns, period_ns / 2);
+    k_msleep(duration_ms);
+    pwm_set_dt(pwm, 0, 0);
+}
+
 static void buzzer_fall_quadratic_hz(
     const struct pwm_dt_spec *pwm,
     uint32_t f_start_hz,
@@ -123,6 +136,20 @@ static void buzzer_fall_quadratic_hz(
     }
 
     pwm_set_dt(pwm, 0, 0);
+}
+
+static void buzzer_voice_fall(
+    const struct pwm_dt_spec *pwm,
+    uint32_t freq_hz,
+    uint32_t duration_ms
+)
+{
+    buzzer_fall_quadratic_hz(
+        pwm,
+        freq_hz,
+        freq_hz * 3 / 4,   // 終了周波数（例）
+        duration_ms
+    );
 }
 
 static void buzzer_beep_ad(
@@ -161,6 +188,18 @@ static void buzzer_beep_ad(
     pwm_set_dt(pwm, 0, 0);
 }
 
+static void buzzer_voice_ad(
+    const struct pwm_dt_spec *pwm,
+    uint32_t freq_hz,
+    uint32_t duration_ms
+)
+{
+    uint32_t attack_ms = duration_ms / 6;   // 例: 1/6 をアタック
+    uint32_t decay_ms  = duration_ms - attack_ms;
+
+    buzzer_beep_ad(pwm, freq_hz, attack_ms, decay_ms);
+}
+
 static void melody_timer_callback(struct k_timer *timer)
 {
     if (current_index >= melody_length) {
@@ -184,7 +223,36 @@ static void melody_timer_callback(struct k_timer *timer)
     k_timer_start(&melody_timer, K_MSEC(note->duration), K_NO_WAIT);
 }
 
-void buzzer_play_melody(const note_t *melody, uint32_t length, bool loop)
+static void melody_timer_callback(struct k_timer *timer)
+{
+    if (current_index >= melody_length) {
+        if (melody_loop) {
+            current_index = 0;
+        } else {
+            buzzer_stop_melody();
+            return;
+        }
+    }
+
+    const note_t *note = &current_melody[current_index++];
+
+    if (note->freq == NOTE_REST) {
+        pwm_set_dt(&buzzer_pwm, 0, 0);
+        k_timer_start(&melody_timer, K_MSEC(note->duration), K_NO_WAIT);
+        return;
+    }
+
+    current_voice(&buzzer_pwm, note->freq, note->duration);
+
+    k_timer_start(&melody_timer, K_NO_WAIT, K_NO_WAIT);
+}
+
+void buzzer_play_melody_ex(
+    const note_t *melody,
+    uint32_t length,
+    bool loop,
+    buzzer_voice_fn_t voice
+)
 {
     buzzer_stop_melody();
 
@@ -192,8 +260,14 @@ void buzzer_play_melody(const note_t *melody, uint32_t length, bool loop)
     melody_length = length;
     current_index = 0;
     melody_loop = loop;
+    current_voice = voice ? voice : buzzer_voice_plain;
 
     k_timer_start(&melody_timer, K_NO_WAIT, K_NO_WAIT);
+}
+
+void buzzer_play_melody(const note_t *melody, uint32_t length, bool loop)
+{
+    buzzer_play_melody_ex(melody, length, loop, buzzer_voice_plain);
 }
 
 void buzzer_stop_melody(void)
@@ -237,7 +311,7 @@ static void advertising_beep_callback(struct k_timer *timer)
 {
     if (!zmk_ble_active_profile_is_connected()) {
         // Not connected, play advertising beep
-        buzzer_play_melody(ble_advertising_beep, sizeof(ble_advertising_beep) / sizeof(note_t), false);
+        buzzer_play_melody_ex(ble_advertising_beep, sizeof(ble_advertising_beep) / sizeof(note_t), false, buzzer_void_ad);
     } else {
         // Connected, stop advertising beep
         is_advertising_beep_active = false;
@@ -327,7 +401,7 @@ static int buzzer_ble_profile_listener(const zmk_event_t *eh)
         start_advertising_beep();
     } else {
         LOG_INF("Profile switched");
-        buzzer_play_melody(ble_profile_change, sizeof(ble_profile_change) / sizeof(note_t), false);
+        buzzer_play_melody_ex(ble_profile_change, sizeof(ble_profile_change) / sizeof(note_t), false, buzzer_voice_ad);
         
         // Check if connected, if not start advertising beep
         if (!zmk_ble_active_profile_is_connected()) {

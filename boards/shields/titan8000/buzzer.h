@@ -42,6 +42,12 @@ typedef struct {
   uint16_t duration;
 } note_t;
 
+typedef void (*buzzer_voice_fn_t)(
+    const struct pwm_dt_spec *pwm,
+    uint32_t freq_hz,
+    uint32_t duration_ms
+);
+
 void buzzer_beep(uint32_t freq_hz, uint32_t duration_ms);
 void buzzer_play_melody(const note_t *melody, uint32_t length, bool loop);
 void buzzer_stop_melody(void);
