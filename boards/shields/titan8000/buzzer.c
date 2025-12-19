@@ -213,6 +213,66 @@ static void buzzer_beep_ad(
     pwm_set_dt(pwm, 0, 0);
 }
 
+static void buzzer_voice_soft(
+    const struct pwm_dt_spec *pwm,
+    uint32_t freq_hz,
+    uint32_t duration_ms
+)
+{
+    const uint32_t period_ns = 1000000000UL / freq_hz;
+    const uint32_t max_pulse = period_ns / 2;
+
+    /* ---- envelope design ---- */
+    uint32_t attack_ms  = duration_ms / 8;        // ~12%
+    uint32_t sustain_ms = duration_ms / 4;        // ~25%
+    uint32_t decay_ms   = duration_ms - attack_ms - sustain_ms;
+
+    if (attack_ms < 4)  attack_ms = 4;
+    if (decay_ms  < 8)  decay_ms  = 8;
+
+    const uint32_t duty_floor = max_pulse / 4;    // 25%
+
+    /* ---------- Attack (quadratic ease-in) ---------- */
+    const uint32_t attack_step_ms = 2;
+    uint32_t a_steps = attack_ms / attack_step_ms;
+    if (a_steps == 0) a_steps = 1;
+
+    for (uint32_t i = 0; i <= a_steps; i++) {
+        if (atomic_get(&buzzer_abort)) return;
+
+        uint32_t num = i * i;
+        uint32_t den = a_steps * a_steps;
+        uint32_t pulse =
+            duty_floor +
+            ((max_pulse - duty_floor) * num) / den;
+
+        pwm_set_dt(pwm, period_ns, pulse);
+        k_sleep(K_MSEC(attack_step_ms));
+    }
+
+    /* ---------- Sustain (fixed level) ---------- */
+    pwm_set_dt(pwm, period_ns, max_pulse * 3 / 4);   // ~75%
+    k_sleep(K_MSEC(sustain_ms));
+
+    /* ---------- Decay (LUT, but never to zero) ---------- */
+    uint32_t decay_step_ms = decay_ms / ARRAY_SIZE(decay_lut);
+    if (decay_step_ms == 0) decay_step_ms = 1;
+
+    for (uint32_t i = 0; i < ARRAY_SIZE(decay_lut); i++) {
+        if (atomic_get(&buzzer_abort)) return;
+
+        uint32_t pulse =
+            duty_floor +
+            ((max_pulse - duty_floor) * decay_lut[i]) / 255;
+
+        pwm_set_dt(pwm, period_ns, pulse);
+        k_sleep(K_MSEC(decay_step_ms));
+    }
+
+    /* stop (explicit silence) */
+    pwm_set_dt(pwm, 0, 0);
+}
+
 static void buzzer_voice_ad(
     const struct pwm_dt_spec *pwm,
     uint32_t freq_hz,
@@ -482,12 +542,12 @@ static int buzzer_ble_profile_listener(const zmk_event_t *eh)
     // Check if the profile is open (no bond) - likely a clear operation
     if (zmk_ble_profile_is_open(ev->index)) {
         LOG_INF("Profile is open (cleared)");
-        buzzer_play_melody(ble_bond_clear, sizeof(ble_bond_clear) / sizeof(note_t), false); 
+        buzzer_play_melody_ex(ble_bond_clear, sizeof(ble_bond_clear) / sizeof(note_t), false, buzzer_voice_soft); 
         // Start advertising beep after clearing
         start_advertising_beep();
     } else {
         LOG_INF("Profile switched");
-        buzzer_play_melody_ex(ble_profile_change, sizeof(ble_profile_change) / sizeof(note_t), false, buzzer_voice_ad);
+        buzzer_play_melody_ex(ble_profile_change, sizeof(ble_profile_change) / sizeof(note_t), false, buzzer_voice_soft);
         
         // Check if connected, if not start advertising beep
         if (!zmk_ble_active_profile_is_connected()) {
