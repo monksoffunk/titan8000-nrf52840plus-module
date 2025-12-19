@@ -430,6 +430,7 @@ static int buzzer_init(void)
 
     k_work_init(&buzzer_work, buzzer_work_handler);
     k_work_init_delayable(&melody_work, melody_work_handler);
+    k_timer_init(&advertising_beep_timer, advertising_beep_callback, NULL);
 
     buzzer_play_melody(success, ARRAY_SIZE(success), false);
 
