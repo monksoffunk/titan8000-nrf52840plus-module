@@ -8,6 +8,7 @@
 #include <zephyr/drivers/pwm.h>
 #include <zephyr/device.h>
 #include <zephyr/logging/log.h>
+#include <zephyr/sys/atomic.h>
 #include "buzzer.h"
 
 #include <zmk/event_manager.h>
@@ -34,7 +35,7 @@ static struct k_work_delayable melody_work;
 static bool melody_work_running = false;
 static struct k_work buzzer_work;
 static struct buzzer_request buzzer_req;
-static bool buzzer_busy = false;
+static atomic_t buzzer_busy = false;
 
 /* 0..255 scale (approx exponential decay) */
 static const uint8_t decay_lut[] = {
@@ -219,15 +220,32 @@ static void buzzer_voice_ad(
 /* worker functions */
 static void buzzer_work_handler(struct k_work *work)
 {
-    buzzer_busy = true;
-
     buzzer_req.voice(
         &buzzer_pwm,
         buzzer_req.freq_hz,
         buzzer_req.duration_ms
     );
 
-    buzzer_busy = false;
+    atomic_clear(&buzzer_busy);
+}
+
+static bool buzzer_request(
+    buzzer_voice_fn_t voice,
+    uint32_t freq_hz,
+    uint32_t duration_ms
+)
+{
+    /* Try to acquire buzzer */
+    if (!atomic_cas(&buzzer_busy, 0, 1)) {
+        return false; /* busy */
+    }
+
+    buzzer_req.voice       = voice;
+    buzzer_req.freq_hz     = freq_hz;
+    buzzer_req.duration_ms = duration_ms;
+
+    k_work_submit(&buzzer_work);
+    return true;
 }
 
 static void melody_timer_callback(struct k_timer *timer)
@@ -379,14 +397,7 @@ static int buzzer_keypress_listener(const zmk_event_t *eh)
     // Only play sound when the key is pressed (do not play when released)
     if (ev->state && keypress_beep_enabled) {
         LOG_INF("KEY PRESSED at position %d", ev->position);
-    //    buzzer_beep(4000, 50);  // 4kHz, 50ms
-    //    buzzer_pitch_fall();
-        if (!buzzer_busy) {
-            buzzer_req.voice = buzzer_voice_ad;
-            buzzer_req.freq_hz = 4000;
-            buzzer_req.duration_ms = 70;
-            k_work_submit(&buzzer_work);
-        }
+        buzzer_request(buzzer_voice_ad, 4000, 70);
     }
 
     return ZMK_EV_EVENT_BUBBLE;
