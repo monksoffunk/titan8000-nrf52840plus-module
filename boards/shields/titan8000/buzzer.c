@@ -122,7 +122,7 @@ static void buzzer_fall_quadratic_hz(
     uint32_t f_end_hz,
     uint32_t duration_ms
 ) {
-    const uint32_t step_ms = 5;                    // 5ms刻み（ZMKでも現実的）
+    const uint32_t step_ms = 5;
     const uint32_t steps = duration_ms / step_ms;
     if (steps == 0) return;
 
@@ -155,7 +155,7 @@ static void buzzer_voice_fall(
     buzzer_fall_quadratic_hz(
         pwm,
         freq_hz,
-        freq_hz * 3 / 4,   // 終了周波数（例）
+        freq_hz * 3 / 4,
         duration_ms
     );
 }
@@ -205,7 +205,7 @@ static void buzzer_voice_ad(
     uint32_t duration_ms
 )
 {
-    uint32_t attack_ms = duration_ms / 6;   // 例: 1/6 をアタック
+    uint32_t attack_ms = duration_ms / 6;
     uint32_t decay_ms  = duration_ms - attack_ms;
 
     buzzer_beep_ad(pwm, freq_hz, attack_ms, decay_ms);
