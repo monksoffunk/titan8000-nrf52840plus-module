@@ -6,6 +6,8 @@
 
 #pragma once
 
+#include <zephyr/drivers/pwm.h>
+
 #define NOTE_C5 523
 #define NOTE_CS5 554
 #define NOTE_D5 587
