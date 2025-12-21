@@ -19,25 +19,40 @@
 LOG_MODULE_REGISTER(buzzer, CONFIG_ZMK_LOG_LEVEL);
 
 #ifdef CONFIG_TITAN8000_BUZZER
+// Buzzer implementation (only compiled when CONFIG_TITAN8000_BUZZER is enabled)
 
 #define BUZZER_NODE DT_CHILD(DT_PATH(buzzers), buzzer)
-// Buzzer implementation (only compiled when CONFIG_TITAN8000_BUZZER is enabled)
 static const struct pwm_dt_spec buzzer_pwm = PWM_DT_SPEC_GET(BUZZER_NODE);
-static const note_t *current_melody = NULL;
-static uint32_t melody_length = 0;
-static uint32_t current_index = 0;
-static bool melody_loop = false;
-static struct k_timer advertising_beep_timer;
-static bool is_advertising_beep_active = false;
-static bool keypress_beep_enabled = false;
-static struct k_work_delayable melody_work;
-static struct k_work buzzer_work;
-static struct k_work_delayable melody_work;
-static struct buzzer_request buzzer_req;
-static atomic_t buzzer_busy;
-static atomic_t melody_active;
-static atomic_t buzzer_abort;
-static atomic_t buzzer_enabled = ATOMIC_INIT(1);
+
+struct buzzer_state {
+    struct pwm_dt_spec pwm;
+
+    struct k_work_q work_q;
+    struct k_work work;
+    struct k_work_delayable melody_work;
+    struct k_timer adv_timer;
+
+    const note_t *melody;
+    uint32_t melody_len;
+    uint32_t index;
+    bool loop;
+    buzzer_voice_fn_t voice;
+
+    struct buzzer_request req;
+
+    atomic_t busy;
+    atomic_t melody_active;
+    atomic_t abort;
+    atomic_t enabled;
+
+    bool adv_active;
+    bool keypress_enabled;
+};
+
+static struct buzzer_state buzzer = {
+    .pwm = PWM_DT_SPEC_GET(BUZZER_NODE),
+    .enabled = ATOMIC_INIT(1),
+};
 
 K_THREAD_STACK_DEFINE(buzzer_stack, 1024);
 static struct k_work_q buzzer_work_q;
@@ -185,7 +200,7 @@ static void buzzer_beep_ad(
     }
 
     for (uint32_t i = 0; i <= a_steps; i++) {
-        if (atomic_get(&buzzer_abort)) return;
+        if (atomic_get(&(buzzer.abort))) return;
         uint32_t pulse = (max_pulse * i) / a_steps;
         pwm_set_dt(pwm, period_ns, pulse);
         k_sleep(K_MSEC(attack_step_ms));
@@ -199,7 +214,7 @@ static void buzzer_beep_ad(
     }
 
     for (uint32_t i = 0; i < ARRAY_SIZE(decay_lut); i++) {
-        if (atomic_get(&buzzer_abort)) return;
+        if (atomic_get(&(buzzer.abort))) return;
         uint32_t pulse = (max_pulse * decay_lut[i]) / 255;
         pwm_set_dt(pwm, period_ns, pulse);
         k_sleep(K_MSEC(decay_step_ms));
@@ -234,7 +249,7 @@ static void buzzer_voice_ad_portamento(
     uint32_t duty_floor = max_pulse / 4;
 
     for (uint32_t i = 0; i <= total_steps; i++) {
-        if (atomic_get(&buzzer_abort)) return;
+        if (atomic_get(&(buzzer.abort))) return;
 
         /* ---- 周波数（全区間で線形ポルタメント） ---- */
         uint32_t period =
@@ -281,42 +296,42 @@ static void buzzer_voice_ad(
 /* worker functions */
 static void buzzer_work_handler(struct k_work *work)
 {
-    buzzer_req.voice(
+    buzzer.req.voice(
         &buzzer_pwm,
-        buzzer_req.freq_hz,
-        buzzer_req.duration_ms
+        buzzer.req.freq_hz,
+        buzzer.req.duration_ms
     );
 
-    atomic_clear(&buzzer_busy);
+    atomic_clear(&(buzzer.busy));
 }
 
 static void melody_work_handler(struct k_work *work)
 {
     /* Acquire PWM ownership */ 
-    if (!atomic_cas(&buzzer_busy, 0, 1)) {
+    if (!atomic_cas(&(buzzer.busy), 0, 1)) {
         /* Another beep is in-flight; reschedule a little later */
-        k_work_schedule_for_queue(&buzzer_work_q, &melody_work, K_MSEC(5));
+        k_work_schedule_for_queue(&buzzer_work_q, &(buzzer.melody_work), K_MSEC(5));
         return;                           
     }                                     
 
-    if (!current_melody || melody_length == 0) {
-        atomic_clear(&melody_active);
-        atomic_clear(&buzzer_busy);       
+    if (!buzzer.melody || buzzer.melody_len == 0) {
+        atomic_clear(&(buzzer.melody_active));
+        atomic_clear(&(buzzer.busy));       
         return;
     }
 
-    while (current_melody) {
-        if (atomic_get(&buzzer_abort)) break;
+    while (buzzer.melody) {
+        if (atomic_get(&(buzzer.abort))) break;
 
-        if (current_index >= melody_length) {
-            if (melody_loop) {
-                current_index = 0;
+        if (buzzer.index >= buzzer.melody_len) {
+            if (buzzer.loop) {
+                buzzer.index = 0;
             } else {
                 break;
             }
         }
 
-        const note_t *note = &current_melody[current_index++];
+        const note_t *note = &buzzer.melody[buzzer.index++];
 
         if (note->freq == NOTE_REST) {
             pwm_set_dt(&buzzer_pwm, 0, 0);
@@ -328,10 +343,10 @@ static void melody_work_handler(struct k_work *work)
     }
 
     pwm_set_dt(&buzzer_pwm, 0, 0);
-    atomic_clear(&melody_active);
-    current_melody = NULL;
-    atomic_clear(&buzzer_busy);           
-    atomic_clear(&buzzer_abort);
+    atomic_clear(&(buzzer.melody_active));
+    buzzer.melody = NULL;
+    atomic_clear(&(buzzer.busy));           
+    atomic_clear(&(buzzer.abort));
 }
 
 static bool buzzer_request(
@@ -340,24 +355,24 @@ static bool buzzer_request(
     uint32_t duration_ms
 )
 {
-    if (atomic_get(&melody_active))
+    if (atomic_get(&(buzzer.melody_active)))
         return false;
 
-    if (!atomic_get(&buzzer_enabled)) {
+    if (!atomic_get(&(buzzer.enabled))) {
         return false;
     }
 
-    atomic_set(&buzzer_abort, 1);
+    atomic_set(&(buzzer.abort), 1);
     pwm_set_dt(&buzzer_pwm,0, 0);
 
-    atomic_set(&buzzer_busy, 1);
-    atomic_clear(&buzzer_abort);
+    atomic_set(&(buzzer.busy), 1);
+    atomic_clear(&(buzzer.abort));
 
-    buzzer_req.voice       = voice;
-    buzzer_req.freq_hz     = freq_hz;
-    buzzer_req.duration_ms = duration_ms;
+    buzzer.req.voice       = voice;
+    buzzer.req.freq_hz     = freq_hz;
+    buzzer.req.duration_ms = duration_ms;
 
-    k_work_submit_to_queue(&buzzer_work_q, &buzzer_work);
+    k_work_submit_to_queue(&(buzzer.work_q), &(buzzer.work));
     return true;
 }
 
@@ -370,18 +385,18 @@ void buzzer_play_melody_ex(
 {
     buzzer_stop_melody();
 
-    if (!atomic_get(&buzzer_enabled)) {
+    if (!atomic_get(&(buzzer.enabled))) {
         return;
     }
 
-    current_melody = melody;
-    melody_length = length;
-    current_index = 0;
-    melody_loop = loop;
+    buzzer.melody = melody;
+    buzzer.melody_len = length;
+    buzzer.index = 0;
+    buzzer.loop = loop;
     current_voice = voice ? voice : buzzer_voice_plain;
 
-    atomic_set(&melody_active, 1);
-    k_work_schedule_for_queue(&buzzer_work_q, &melody_work, K_NO_WAIT);
+    atomic_set(&(buzzer.melody_active), 1);
+    k_work_schedule_for_queue(&(buzzer.work_q), &(buzzer.melody_work), K_NO_WAIT);
 }
 
 void buzzer_play_melody(const note_t *melody, uint32_t length, bool loop)
@@ -391,39 +406,40 @@ void buzzer_play_melody(const note_t *melody, uint32_t length, bool loop)
 
 void buzzer_stop_melody(void)
 {
-    k_work_cancel_delayable(&melody_work);
+    k_work_cancel_delayable(&(buzzer.melody_work));
     pwm_set_dt(&buzzer_pwm, 0, 0);
-    current_melody = NULL;
-    atomic_clear(&melody_active);
+    buzzer.melody = NULL;
+    atomic_clear(&(buzzer.melody_active));
 }
 
 bool buzzer_is_playing(void)
 {
-    return (current_melody != NULL);
+    return (buzzer.melody != NULL);
 }
 
 void buzzer_toggle_keypress_beep(void)
 {
-    keypress_beep_enabled = !keypress_beep_enabled;
-    LOG_INF("Keypress beep %s", keypress_beep_enabled ? "ENABLED" : "DISABLED");
+    buzzer.keypress_enabled = !buzzer.keypress_enabled;
+    LOG_INF("Keypress beep %s", buzzer.keypress_enabled ? "ENABLED" : "DISABLED");
     
     // Play confirmation sound
-    if (keypress_beep_enabled) {
-        buzzer_voice_ad_portamento(&buzzer_pwm, NOTE_C7, NOTE_B7, 180);
-//        BUZZER_PLAY_MELODY(keypress_on);
+    if (buzzer.keypress_enabled) {
+        buzzer_voice_ad_portamento(&buzzer_pwm, NOTE_C7, NOTE_B7, 140);
+//      BUZZER_PLAY_MELODY(keypress_on);
     } else {
         BUZZER_PLAY_MELODY(keypress_off);
     }
 }
-
+/*
 static void buzzer_pitch_fall() 
 {
     buzzer_fall_quadratic_hz(&buzzer_pwm, 4000, 3000, 50);
 }
+*/
 
-bool buzzer_is_keypress_beep_enabled(void)
+bool buzzer_is_keypress_enabled(void)
 {
-    return keypress_beep_enabled;
+    return buzzer.keypress_enabled;
 }
 
 static void advertising_beep_callback(struct k_timer *timer)
@@ -433,25 +449,25 @@ static void advertising_beep_callback(struct k_timer *timer)
         BUZZER_PLAY_MELODY(ble_advertising_beep);
     } else {
         // Connected, stop advertising beep
-        is_advertising_beep_active = false;
-        k_timer_stop(&advertising_beep_timer);
+        buzzer.adv_active = false;
+        k_timer_stop(&(buzzer.adv_timer));
     }
 }
 
 static void start_advertising_beep(void)
 {
-    if (!is_advertising_beep_active) {
-        is_advertising_beep_active = true;
-        k_timer_start(&advertising_beep_timer, K_SECONDS(3), K_SECONDS(3));
+    if (!buzzer.adv_active) {
+        buzzer.adv_active = true;
+        k_timer_start(&(buzzer.adv_timer), K_SECONDS(3), K_SECONDS(3));
         LOG_INF("Advertising beep started");
     }
 }
 
 static void stop_advertising_beep(void)
 {
-    if (is_advertising_beep_active) {
-        is_advertising_beep_active = false;
-        k_timer_stop(&advertising_beep_timer);
+    if (buzzer.adv_active) {
+        buzzer.adv_active = false;
+        k_timer_stop(&(buzzer.adv_timer));
         LOG_INF("Advertising beep stopped");
     }
 }
@@ -467,18 +483,18 @@ static int buzzer_init(void)
     LOG_INF("PWM Device: %s", buzzer_pwm.dev->name);
     LOG_INF("PWM Ready: YES");
     LOG_INF("========================================");
-        
+    
     k_work_queue_start(
-        &buzzer_work_q,
+        &(buzzer.work_q),
         buzzer_stack,
         K_THREAD_STACK_SIZEOF(buzzer_stack),
         K_PRIO_PREEMPT(5),
         NULL
     );
 
-    k_work_init(&buzzer_work, buzzer_work_handler);
-    k_work_init_delayable(&melody_work, melody_work_handler);
-    k_timer_init(&advertising_beep_timer, advertising_beep_callback, NULL);
+    k_work_init(&(buzzer.work), buzzer_work_handler);
+    k_work_init_delayable(&(buzzer.melody_work), melody_work_handler);
+    k_timer_init(&(buzzer.adv_timer), advertising_beep_callback, NULL);
 
     BUZZER_PLAY_MELODY(success);
 
@@ -495,7 +511,7 @@ static int buzzer_keypress_listener(const zmk_event_t *eh)
     }
 
     // Only play sound when the key is pressed (do not play when released)
-    if (ev->state && keypress_beep_enabled) {
+    if (ev->state && buzzer.keypress_enabled) {
         LOG_INF("KEY PRESSED at position %d", ev->position);
         buzzer_request(buzzer_voice_ad, NOTE_B7, 150);
     }
@@ -540,13 +556,13 @@ ZMK_SUBSCRIPTION(buzzer_ble, zmk_ble_active_profile_changed);
 
 void buzzer_toggle_enable(void)
 {
-    if (atomic_get(&buzzer_enabled)) {
-        atomic_clear(&buzzer_enabled);
+    if (atomic_get(&(buzzer.enabled))) {
+        atomic_clear(&(buzzer.enabled));
         pwm_set_dt(&buzzer_pwm, 0, 0);
-        atomic_set(&buzzer_abort, 1);
+        atomic_set(&(buzzer.abort), 1);
         LOG_INF("Buzzer muted");
     } else {
-        atomic_set(&buzzer_enabled, 1);
+        atomic_set(&(buzzer.enabled), 1);
         LOG_INF("Buzzer enabled");
     }
 }
