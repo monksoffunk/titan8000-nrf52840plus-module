@@ -1,0 +1,6 @@
+file_format: "1"
+id: titan8000
+name: Titan 8000
+type: shield
+features:
+  - keys

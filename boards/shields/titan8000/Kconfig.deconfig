@@ -1,7 +1,10 @@
+# Copyright (c) 2021 The ZMK Contributors
+# SPDX-License-Identifier: MIT
+
 if SHIELD_TITAN8000
 
 config ZMK_KEYBOARD_NAME
-	default "Titan 8000"
+    default "Titan 8000"
 
 config PWM
     default y if TITAN8000_BUZZER

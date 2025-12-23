@@ -6,6 +6,8 @@ BOARD1				:= xiao_ble_plus
 BOARD2				:= xiao_rp2040
 TARGET1				:= $(KEYBOARD_NAME)_$(BOARD1).uf2
 TARGET2				:= $(KEYBOARD_NAME)_$(BOARD2).uf2
+DEBUG_TARGET1		:= $(KEYBOARD_NAME)_$(BOARD1)_debug.uf2
+DEBUG_TARGET2		:= $(KEYBOARD_NAME)_$(BOARD2)_debug.uf2
 
 # ===== Python venv management =====
 
@@ -14,7 +16,9 @@ PYTHON   := python3
 PIP      := $(VENV_DIR)/bin/pip
 ACTIVATE := . $(VENV_DIR)/bin/activate
 
-.PHONY: venv venv-clean deps pip-list shell
+all	: $(TARGET1) $(TARGET2) 
+
+debug: $(DEBUG_TARGET1) $(DEBUG_TARGET2)
 
 venv:
 	@test -d $(VENV_DIR) || $(PYTHON) -m venv $(VENV_DIR)
@@ -32,22 +36,29 @@ shell: venv
 venv-clean:
 	@rm -rf $(VENV_DIR)
 
-all	: $(TARGET1) $(TARGET2) 
-
 $(TARGET1):
-	west build -s zmk/app -b seeeduino_xiao_ble -d build/titan8000 -S zmk-usb-logging -p always -- -DSHIELD=titan8000
+	west build -s zmk/app -b seeeduino_xiao_ble -d build/titan8000 -S studio-rpc-usb-uart -p always -- -DSHIELD=titan8000
 	mv $(DEFAULT_TARGET) $(TARGET1)
 
 $(TARGET2):
-	west build -s zmk/app -b seeeduino_xiao_rp2040 -d build/titan8000 -S zmk-usb-logging -p always -- -DSHIELD=titan8000
+	west build -s zmk/app -b seeeduino_xiao_rp2040 -d build/titan8000  -S studio-rpc-usb-uart -p always -- -DSHIELD=titan8000
 	mv $(DEFAULT_TARGET) $(TARGET2)
+
+$(DEBUG_TARGET1):
+	west build -s zmk/app -b seeeduino_xiao_ble -d build/titan8000 -S zmk-usb-logging -p always -- -DSHIELD=titan8000
+	mv $(DEFAULT_TARGET) $(DEBUG_TARGET1)	
+
+$(DEBUG_TARGET2):
+	west build -s zmk/app -b seeeduino_xiao_rp2040 -d build/titan8000  -S zmk-usb-logging -p always -- -DSHIELD=titan8000
+	mv $(DEFAULT_TARGET) $(DEBUG_TARGET2)
 
 clean:
 	@rm -rf build
 
 fclean: clean
 	@rm -f $(TARGET1) $(TARGET2)
+	@rm -f $(DEBUG_TARGET1) $(DEBUG_TARGET2)
 
 re: fclean all
 
-.PHONY: all re clean fclean
+.PHONY: all re clean fclean venv venv-clean deps pip-list shell
