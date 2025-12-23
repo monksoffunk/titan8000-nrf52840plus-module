@@ -63,6 +63,24 @@ static const uint8_t decay_lut[] = {
      13,   9,   6,   4,   2,   1,   0,
 };
 
+
+struct buzzer_melody_request {
+    sys_snode_t node;
+    const note_t *melody;
+    uint32_t length;
+    bool loop;
+    buzzer_voice_fn_t voice;
+};
+
+// BUZZER_MELODY_QUEUE_LEN SHOULD BE <= 32
+#define BUZZER_MELODY_QUEUE_LEN 8
+
+static struct buzzer_melody_request melody_pool[BUZZER_MELODY_QUEUE_LEN];
+static atomic_t melody_pool_bitmap;
+
+K_FIFO_DEFINE(buzzer_melody_fifo);
+
+
 // BLE profile change melody (descending tones)
 static const note_t ble_profile_change[] = {
     {NOTE_G7, 140}, 
@@ -111,7 +129,10 @@ static const note_t warning[] = {
 // static const note_t keypress_on[] = { {NOTE_C7, 100}, {NOTE_C8, 100} };
 static const note_t keypress_off[] = { {NOTE_E7, 100}, {NOTE_D7, 100} };
 
-// --- note_t配列だけで呼べるマクロ定義 ---
+
+#define BUZZER_MELODY_REQ(notes_array) \
+    buzzer_melody_request((notes_array), sizeof(notes_array) / sizeof(note_t), false, buzzer_voice_ad)
+
 #define BUZZER_PLAY_MELODY(notes_array) \
     buzzer_play_melody_ex((notes_array), sizeof(notes_array) / sizeof(note_t), false, buzzer_voice_ad)
 
@@ -313,49 +334,7 @@ static void buzzer_work_handler(struct k_work *work)
     atomic_clear_bit(&buzzer.state, BUZZER_BUSY);
 }
 
-static void melody_work_handler(struct k_work *work)
-{
-    /* Acquire PWM ownership */ 
-    if (atomic_test_and_set_bit(&buzzer.state, BUZZER_BUSY)) {
-        /* Another beep is in-flight; reschedule a little later */
-        k_work_schedule_for_queue(&buzzer.work_q, &(buzzer.melody_work), K_MSEC(5));
-        return;                           
-    }                                     
 
-    if (!buzzer.melody || buzzer.melody_len == 0) {
-        atomic_clear_bit(&buzzer.state, BUZZER_MELODY_ACTIVE);
-        atomic_clear_bit(&buzzer.state, BUZZER_BUSY);       
-        return;
-    }
-
-    while (buzzer.melody) {
-        if (atomic_test_bit(&buzzer.state, BUZZER_ABORT)) break;
-
-        if (buzzer.index >= buzzer.melody_len) {
-            if (buzzer.loop) {
-                buzzer.index = 0;
-            } else {
-                break;
-            }
-        }
-
-        const note_t *note = &buzzer.melody[buzzer.index++];
-
-        if (note->freq == NOTE_REST) {
-            pwm_set_dt(&buzzer.pwm, 0, 0);
-            k_msleep(note->duration);
-            continue;
-        }
-
-        buzzer.voice(&buzzer.pwm, note->freq, note->duration);
-    }
-
-    pwm_set_dt(&buzzer.pwm, 0, 0);
-    atomic_clear_bit(&buzzer.state, BUZZER_MELODY_ACTIVE);
-    buzzer.melody = NULL;
-    atomic_clear_bit(&buzzer.state, BUZZER_BUSY);           
-    atomic_clear_bit(&buzzer.state, BUZZER_ABORT);
-}
 
 static bool buzzer_request(
     buzzer_voice_fn_t voice,
@@ -384,6 +363,54 @@ static bool buzzer_request(
     return true;
 }
 
+static struct buzzer_melody_request *alloc_melody_req(void) {
+    for (int i = 0; i < BUZZER_MELODY_QUEUE_LEN; i++) {
+        if (!atomic_test_and_set_bit(&melody_pool_bitmap, i)) {
+            return &melody_pool[i];
+        }
+    }
+    return NULL;
+}
+
+static void free_melody_req(struct buzzer_melody_request *req) {
+    int index = req - melody_pool;
+    if (index >= 0 && index < BUZZER_MELODY_QUEUE_LEN) {
+        atomic_clear_bit(&melody_pool_bitmap, index);
+    }
+}
+
+bool buzzer_melody_request(
+    const note_t *melody,
+    uint32_t len,
+    bool loop,
+    buzzer_voice_fn_t voice
+)
+{
+    if (!atomic_test_bit(&buzzer.state, BUZZER_ENABLED)) {
+        return false;
+    }
+
+    struct buzzer_melody_request *req = alloc_melody_req();
+    if (!req) {
+        LOG_WRN("Melody queue is full, request dropped");
+        return false;
+    }
+
+    req->melody = melody;
+    req->length = len;
+    req->loop = loop;
+    req->voice = voice ? voice : buzzer_voice_plain;
+
+    k_fifo_put(&buzzer_melody_fifo, req);
+
+    if (!atomic_test_bit(&buzzer.state, BUZZER_MELODY_ACTIVE)) {
+        atomic_set_bit(&buzzer.state, BUZZER_MELODY_ACTIVE);
+        k_work_submit_to_queue(&buzzer.work_q, &buzzer.melody_work.work);
+    }
+
+    return true;
+}
+
 void buzzer_play_melody_ex(
     const note_t *melody,
     uint32_t length,
@@ -391,8 +418,6 @@ void buzzer_play_melody_ex(
     buzzer_voice_fn_t voice
 )
 {
-    buzzer_stop_melody();
-
     if (!atomic_test_bit(&buzzer.state, BUZZER_ENABLED)) {
         return;
     }
@@ -402,14 +427,45 @@ void buzzer_play_melody_ex(
     buzzer.index = 0;
     buzzer.loop = loop;
     buzzer.voice = voice ? voice : buzzer_voice_plain;
-
-    atomic_set_bit(&buzzer.state, BUZZER_MELODY_ACTIVE);
-    k_work_schedule_for_queue(&(buzzer.work_q), &(buzzer.melody_work), K_NO_WAIT);
 }
 
 void buzzer_play_melody(const note_t *melody, uint32_t length, bool loop)
 {
     buzzer_play_melody_ex(melody, length, loop, buzzer_voice_plain);
+}
+
+
+static void melody_work_handler(struct k_work *work) {
+    atomic_set_bit(&buzzer.state, BUZZER_BUSY);
+
+    while (1) {
+        struct buzzer_melody_request *req =
+            k_fifo_get(&buzzer_melody_fifo, K_NO_WAIT);
+
+        if (!req) {
+            break;
+        }
+
+        const note_t *melody = req->melody;
+        uint32_t len = req->length;
+        buzzer_voice_fn_t voice = req->voice;
+
+        for (uint32_t i = 0; i < len; i++) {
+            const note_t *note = &melody[i];
+
+            if (note->freq == NOTE_REST) {
+                pwm_set_dt(&buzzer.pwm, 0,0);
+                k_msleep(note->duration);
+            } else {
+                voice(&buzzer.pwm, note->freq, note->duration);
+            }
+        }
+        pwm_set_dt(&buzzer.pwm, 0, 0);
+        free_melody_req(req);
+    }
+
+    atomic_clear_bit(&buzzer.state, BUZZER_BUSY);
+    atomic_clear_bit(&buzzer.state, BUZZER_MELODY_ACTIVE);
 }
 
 void buzzer_stop_melody(void)
@@ -433,9 +489,9 @@ void buzzer_toggle_keypress_beep(void)
     // Play confirmation sound
     if (buzzer.keypress_enabled) {
         buzzer_voice_ad_portamento(&buzzer.pwm, NOTE_C7, NOTE_B7, 140);
-//      BUZZER_PLAY_MELODY(keypress_on);
+//      BUZZER_MELODY_REQ(keypress_on);
     } else {
-        BUZZER_PLAY_MELODY(keypress_off);
+        BUZZER_MELODY_REQ(keypress_off);
     }
 }
 /*
@@ -454,7 +510,7 @@ static void advertising_beep_callback(struct k_timer *timer)
 {
     if (!zmk_ble_active_profile_is_connected()) {
         // Not connected, play advertising beep
-        BUZZER_PLAY_MELODY(ble_advertising_beep);
+        BUZZER_MELODY_REQ(ble_advertising_beep);
     } else {
         // Connected, stop advertising beep
         buzzer.adv_active = false;
@@ -510,13 +566,13 @@ static int buzzer_init(void)
     k_work_init_delayable(&(buzzer.melody_work), melody_work_handler);
     k_timer_init(&(buzzer.adv_timer), advertising_beep_callback, NULL);
 
-    BUZZER_PLAY_MELODY(success);
+    BUZZER_MELODY_REQ(success);
 
     return 0;
 }
 
 void titan8000_play_soft_off_tone(void) {
-    BUZZER_PLAY_MELODY(soft_off);
+    BUZZER_MELODY_REQ(soft_off);
    // buzzer_voice_ad_portamento(&buzzer.pwm, NOTE_B7, NOTE_C7, 140);
     k_sleep(K_MSEC(900));
 }
@@ -554,12 +610,12 @@ static int buzzer_ble_profile_listener(const zmk_event_t *eh)
     // Check if the profile is open (no bond) - likely a clear operation
     if (zmk_ble_profile_is_open(ev->index)) {
         LOG_INF("Profile is open (cleared)");
-        BUZZER_PLAY_MELODY(ble_bond_clear);
+        BUZZER_MELODY_REQ(ble_bond_clear);
         // Start advertising beep after clearing
         start_advertising_beep();
     } else {
         LOG_INF("Profile switched");
-        BUZZER_PLAY_MELODY(ble_profile_change);
+        BUZZER_MELODY_REQ(ble_profile_change);
         // Check if connected, if not start advertising beep
         if (!zmk_ble_active_profile_is_connected()) {
             start_advertising_beep();
