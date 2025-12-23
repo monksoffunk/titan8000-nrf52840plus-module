@@ -1,5 +1,6 @@
 #include <dt-bindings/zmk/matrix_transform.h>
 #include "titan8000-layouts.dtsi"
+#include "titan8000-soft-off.dtsi"
 
 / {
 	kscan0: kscan {

@@ -26,6 +26,10 @@
     quick-tap-ms = <200>;
 };
 
+&titanoff {
+	hold-time-ms = <2000>;
+};
+
 / {
 	keymap {
 		compatible = "zmk,keymap";
@@ -69,7 +73,7 @@
 			bindings = <
 				&trans	&bt BT_SEL 0	&bt BT_SEL 1	&bt BT_SEL 2	&bt BT_SEL 3	&bt BT_SEL 4		&kp F6		&kp F7		&kp F8		&kp F9		&kp F10		&kp F11			&kp F12		&bt BT_PRV	 	&bt BT_NXT			&mo BT2_LAYER
 				&trans	&kp Q		&kp W		&kp E		&kp R		&kp T		&kp Y		&kp U		&kp I		&kp O		&kp P		&kp LBKT	&kp BSPC	&kp KP_N7			&kp KP_N8		&kp KP_N9
-				&kp CAPS	&kp A		&soft_off	&kp D		&kp F		&kp G		&kp H		&kp J		&kp K		&kp L		&kp SEMI	&kp RET					&kp KP_N4		&kp KP_N5		&kp KP_N6
+				&kp CAPS	&kp A		&titanoff	&kp D		&kp F		&kp G		&kp H		&kp J		&kp K		&kp L		&kp SEMI	&kp RET					&kp KP_N4		&kp KP_N5		&kp KP_N6
 				&kp LSHIFT	&kp Z		&kp X		&kp C		&kp V		BUZ_KEYP_TOG	&kp N		&kp M		&kp COMMA	&kp DOT		&kp RSHIFT		&kp UP				&kp KP_N1		&kp KP_N2		&kp KP_N3
 				&kp LCTRL	&kp LGUI	&kp LALT	&kp SPACE	&kp BSPC	&kp RALT	&kp RCTRL											&kp LEFT	&kp DOWN	&kp RIGHT				&kp KP_N0		&kp KP_DOT
 			>;		
@@ -80,7 +84,7 @@
 			bindings = <
 				&bt BT_CLR	&bt BT_DISC 0	&bt BT_DISC 1	&bt BT_DISC 2	&bt BT_DISC 3	&bt BT_DISC 4		&kp F6		&kp F7		&kp F8		&kp F9		&kp F10		&kp F11			&bt BT_CLR_ALL	&trans			&trans			&trans
 				&bootloader	&kp Q		&kp W		&kp E		&kp R		&kp T		&kp Y		&kp U		&kp I		&kp O		&kp P		&kp LBKT	&kp BSPC	&kp KP_N7		&kp KP_N8		&kp KP_N9
-				&kp CAPS	&kp A		&soft_off	&kp D		&kp F		&kp G		&kp H		&kp J		&kp K		&kp L		&kp SEMI	&kp RET					&kp KP_N4		&kp KP_N5		&kp KP_N6
+				&kp CAPS	&kp A		&titanoff	&kp D		&kp F		&kp G		&kp H		&kp J		&kp K		&kp L		&kp SEMI	&kp RET					&kp KP_N4		&kp KP_N5		&kp KP_N6
 				&kp LSHIFT	&kp Z		&kp X		&kp C		&kp V		BUZ_TOG		&kp N		&kp M		&kp COMMA	&kp DOT		&kp RSHIFT		&kp UP				&kp KP_N1		&kp KP_N2		&kp KP_N3
 				&kp LCTRL	&kp LGUI	&kp LALT	&kp SPACE	&kp BSPC	&kp RALT	&kp RCTRL											&kp LEFT	&kp DOWN	&kp RIGHT				&kp KP_N0		&kp KP_DOT
 			>;		

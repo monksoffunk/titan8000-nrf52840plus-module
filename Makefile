@@ -7,14 +7,39 @@ BOARD2				:= xiao_rp2040
 TARGET1				:= $(KEYBOARD_NAME)_$(BOARD1).uf2
 TARGET2				:= $(KEYBOARD_NAME)_$(BOARD2).uf2
 
+# ===== Python venv management =====
+
+VENV_DIR := .venv
+PYTHON   := python3
+PIP      := $(VENV_DIR)/bin/pip
+ACTIVATE := . $(VENV_DIR)/bin/activate
+
+.PHONY: venv venv-clean deps pip-list shell
+
+venv:
+	@test -d $(VENV_DIR) || $(PYTHON) -m venv $(VENV_DIR)
+	@$(PIP) install --upgrade pip
+
+deps: venv
+	@$(PIP) install -r requirements.txt
+
+pip-list: venv
+	@$(PIP) list
+
+shell: venv
+	@bash -c '$(ACTIVATE) && exec $$SHELL -i'
+
+venv-clean:
+	@rm -rf $(VENV_DIR)
+
 all	: $(TARGET1) $(TARGET2) 
 
 $(TARGET1):
-	west build -s zmk/app -b seeeduino_xiao_ble -d build/titan8000 -p always -- -DSHIELD=titan8000
+	west build -s zmk/app -b seeeduino_xiao_ble -d build/titan8000 -S zmk-usb-logging -p always -- -DSHIELD=titan8000
 	mv $(DEFAULT_TARGET) $(TARGET1)
 
 $(TARGET2):
-	west build -s zmk/app -b seeeduino_xiao_rp2040 -d build/titan8000 -p always -- -DSHIELD=titan8000
+	west build -s zmk/app -b seeeduino_xiao_rp2040 -d build/titan8000 -S zmk-usb-logging -p always -- -DSHIELD=titan8000
 	mv $(DEFAULT_TARGET) $(TARGET2)
 
 clean:

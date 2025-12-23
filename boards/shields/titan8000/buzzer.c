@@ -60,31 +60,43 @@ K_THREAD_STACK_DEFINE(buzzer_stack, 1024);
 static const uint8_t decay_lut[] = {
     255, 220, 190, 165, 142, 122, 104,  88,
      74,  62,  52,  43,  35,  28,  22,  17,
-     13,   9,   6,   4,   2,   1,   0
+     13,   9,   6,   4,   2,   1,   0,
 };
 
 // BLE profile change melody (descending tones)
 static const note_t ble_profile_change[] = {
-    {NOTE_G7, 140},
-    {NOTE_E7, 140},
-    {NOTE_C7, 140}
+    {NOTE_G7, 140}, 
+    {NOTE_E7, 140}, 
+    {NOTE_C7, 140},
 };
 
 // BLE bond clear melody (ascending tones)
 static const note_t ble_bond_clear[] = {
-    {NOTE_C7, 140},
-    {NOTE_G7, 140}
+    {NOTE_C7, 140}, 
+    {NOTE_G7, 140},
 };
 
 // BLE advertising beep (repeating pip-pip)
 static const note_t ble_advertising_beep[] = {
+    {NOTE_G7, 150}, 
+    {NOTE_REST, 50}, 
     {NOTE_G7, 150},
-    {NOTE_REST, 50},
-    {NOTE_G7, 150}
 };
 
 static const note_t success[] = {
-    {NOTE_E7, 140}, {NOTE_B7, 140}, {NOTE_E8, 400},
+    {NOTE_E7, 140}, 
+    {NOTE_B7, 140}, 
+    {NOTE_E8, 400},
+};
+
+static const note_t soft_off[] = {
+    {NOTE_C7, 140}, 
+    {NOTE_REST, 100}, 
+    {NOTE_B6, 140}, 
+    {NOTE_REST, 100}, 
+    {NOTE_G6, 140}, 
+    {NOTE_REST, 100}, 
+    {NOTE_D6, 140},
 };
 
 /*
@@ -236,22 +248,21 @@ static void buzzer_voice_ad_portamento(
     if (attack_ms < 4) attack_ms = 4;
     if (decay_ms  < 8) decay_ms  = 8;
 
-    uint32_t total_steps = duration_ms / step_ms;
+    int32_t total_steps = duration_ms / step_ms;
     if (total_steps == 0) total_steps = 1;
 
     uint32_t period_start = 1000000000UL / freq_start_hz;
     uint32_t period_end   = 1000000000UL / freq_end_hz;
+    int32_t period_diff = period_start - period_end;
 
     uint32_t max_pulse  = period_start / 2;
     uint32_t duty_floor = max_pulse / 4;
 
-    for (uint32_t i = 0; i <= total_steps; i++) {
+    for (int32_t i = 0; i <= total_steps; i++) {
         if (atomic_test_bit(&buzzer.state, BUZZER_ABORT)) return;
 
         /* ---- 周波数（全区間で線形ポルタメント） ---- */
-        uint32_t period =
-            period_start -
-            ((period_start - period_end) * i) / total_steps;
+        uint32_t period = period_start - (period_diff * i) / total_steps;
 
         /* ---- 音量（AD） ---- */
         uint32_t t_ms = i * step_ms;
@@ -502,6 +513,12 @@ static int buzzer_init(void)
     BUZZER_PLAY_MELODY(success);
 
     return 0;
+}
+
+void titan8000_play_soft_off_tone(void) {
+    BUZZER_PLAY_MELODY(soft_off);
+   // buzzer_voice_ad_portamento(&buzzer.pwm, NOTE_B7, NOTE_C7, 140);
+    k_sleep(K_MSEC(900));
 }
 
 SYS_INIT(buzzer_init, APPLICATION, CONFIG_APPLICATION_INIT_PRIORITY);

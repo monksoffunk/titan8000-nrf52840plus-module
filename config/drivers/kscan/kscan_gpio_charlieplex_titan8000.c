@@ -16,6 +16,15 @@
 #include <zephyr/pm/device.h>
 #include <zephyr/sys/__assert.h>
 #include <zephyr/sys/util.h>
+#include <zephyr/sys/poweroff.h>
+
+#if IS_ENABLED(CONFIG_ZMK_PM_SOFT_OFF)
+//#if IS_ENABLED(CONFIG_PM_DEVICE)
+#include <zephyr/sys/atomic.h>
+static atomic_t soft_off_pending;
+static const struct device *titan8000_charlieplex_dev;
+void titan8000_play_soft_off_tone(void);
+#endif
 
 LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 
@@ -286,6 +295,13 @@ static void kscan_charlieplex_read_end(const struct device *dev) {
     if (config->use_interrupt) {
         /* Return to waiting for an interrupt. */
         kscan_charlieplex_interrupt_enable(dev);
+
+#if IS_ENABLED(CONFIG_ZMK_PM_SOFT_OFF)
+//#if IS_ENABLED(CONFIG_PM_DEVICE)
+        if (atomic_cas(&soft_off_pending, 1, 0)) {
+            sys_poweroff();
+        }
+#endif
     } else {
         data->scan_time += config->poll_period_ms;
 
@@ -472,10 +488,28 @@ static void kscan_charlieplex_setup_pins(const struct device *dev) {
 }
 
 #if IS_ENABLED(CONFIG_PM_DEVICE)
+#include <zephyr/sys/printk.h> // added
 
 static int kscan_charlieplex_pm_action(const struct device *dev, enum pm_device_action action) {
+    LOG_ERR("pm_action action=%d wake=%d", action, pm_device_wakeup_is_enabled(dev)); // changedLOG_ERR("pm_action action=%d wake=%d", action, pm_device_wakeup_is_enabled(dev)); // changed
+
+        printk("kscan_charlieplex_pm_action: action=%d wake=%d\n",               // added
+           action, pm_device_wakeup_is_enabled(dev));    
     switch (action) {
     case PM_DEVICE_ACTION_SUSPEND:
+        k_work_cancel_delayable(&((struct kscan_charlieplex_data *)dev->data)->work);           // added: stop scan work deterministically
+        (void)kscan_charlieplex_set_all_as_input(dev);                                           // added: release any output drive before poweroff
+        (void)kscan_charlieplex_interrupt_line_input_pulldown(dev);                              // added: ensure IRQ line is in input+pull state
+
+        if (pm_device_wakeup_is_enabled(dev)) {                                                  // added: prepare wake for System OFF here
+            (void)kscan_charlieplex_interrupt_configure(dev, GPIO_INT_LEVEL_ACTIVE);             // added: arm wake (sense/level) before sys_poweroff
+        } else {
+            (void)kscan_charlieplex_interrupt_configure(dev, GPIO_INT_DISABLE);                  // changed: keep explicit disable for non-wake suspend
+        }
+
+        (void)kscan_charlieplex_disconnect_all(dev);                                             // moved/kept: cells can be disconnected for low power
+        return 0; 
+        
         kscan_charlieplex_interrupt_configure(dev, GPIO_INT_DISABLE);
         kscan_charlieplex_disconnect_all(dev);
 
@@ -499,6 +533,18 @@ static int kscan_charlieplex_pm_action(const struct device *dev, enum pm_device_
     }
 }
 
+void titan8000_charlieplex_request_soft_off(void) {
+    #if IS_ENABLED(CONFIG_ZMK_PM_SOFT_OFF)
+    titan8000_play_soft_off_tone();
+    atomic_set(&soft_off_pending, 1);
+
+    if (titan8000_charlieplex_dev) {
+        struct kscan_charlieplex_data *data = titan8000_charlieplex_dev->data;
+        k_work_reschedule(&data->work, K_NO_WAIT);
+    }
+    #endif
+}
+
 #endif /* IS_ENABLED(CONFIG_PM_DEVICE) */
 
 static int kscan_charlieplex_init(const struct device *dev) {
@@ -507,6 +553,10 @@ static int kscan_charlieplex_init(const struct device *dev) {
     data->dev = dev;
 
     k_work_init_delayable(&data->work, kscan_charlieplex_work_handler);
+
+#if IS_ENABLED(CONFIG_ZMK_PM_SOFT_OFF)
+    titan8000_charlieplex_dev = dev;
+#endif
 
 #if IS_ENABLED(CONFIG_PM_DEVICE)
     pm_device_init_suspended(dev);

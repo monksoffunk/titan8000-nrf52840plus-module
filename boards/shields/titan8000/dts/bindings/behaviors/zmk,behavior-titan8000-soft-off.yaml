@@ -1,0 +1,17 @@
+# Copyright (c) 2025
+# SPDX-License-Identifier: MIT
+
+description: Titan8000 soft-off request behavior
+
+compatible: "zmk,behavior-titan8000-soft-off"
+
+include: zero_param.yaml
+
+properties:
+  hold-time-ms:
+    type: int
+    required: false
+    description: Number of milliseconds the behavior must be held before releasing will actually trigger a soft-off.
+  split-peripheral-off-on-press:
+    type: boolean
+    description: When built for a split peripheral, turn off on press, not release

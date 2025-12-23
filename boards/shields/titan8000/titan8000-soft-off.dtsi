@@ -1,0 +1,9 @@
+/ {
+	behaviors {
+        titanoff: titan8000_soft_off {
+            compatible = "zmk,behavior-titan8000-soft-off";
+            #binding-cells = <0>;
+			split-peripheral-off-on-press;
+        };
+    };
+};
