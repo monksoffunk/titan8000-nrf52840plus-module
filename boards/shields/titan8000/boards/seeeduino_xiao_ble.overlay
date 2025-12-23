@@ -23,7 +23,7 @@
 / {
     buzzers {
         compatible = "pwm-leds";
-        buzzer: buzzer {
+        buzzer_pwm: buzzer {
             pwms = <&pwm0 0 0 PWM_POLARITY_NORMAL>;
         };
     };

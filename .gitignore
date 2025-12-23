@@ -10,6 +10,7 @@ tools/
 # Build artifacts
 build/
 config/build/
+*.uf2
 
 # macOS
 .DS_Store

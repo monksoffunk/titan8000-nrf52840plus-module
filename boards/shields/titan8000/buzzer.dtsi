@@ -7,9 +7,9 @@
 
 / {
     behaviors {
-        /omit-if-no-ref/ buzzer_tog: buzzer_tog {
-            compatible = "zmk,behavior-buzzer-tog";
-            #binding-cells = <0>;
+        /omit-if-no-ref/ buzz: buzzer {
+            compatible = "zmk,behavior-buzzer";
+            #binding-cells = <1>;
         };
     };
 };
