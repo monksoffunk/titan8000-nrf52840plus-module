@@ -6,6 +6,8 @@
 
 #pragma once
 
+#include <zephyr/drivers/pwm.h>
+
 #define NOTE_C5 523
 #define NOTE_CS5 554
 #define NOTE_D5 587
@@ -35,12 +37,43 @@
 #define NOTE_D7 2349
 #define NOTE_DS7 2489
 #define NOTE_E7 2637
+#define NOTE_F7   2794
+#define NOTE_FS7  2960
+#define NOTE_G7   3136
+#define NOTE_GS7  3322
+#define NOTE_A7   3520
+#define NOTE_AS7  3729
+#define NOTE_B7   3951
+#define NOTE_C8   4186
+#define NOTE_CS8  4435
+#define NOTE_D8   4699
+#define NOTE_DS8  4978
+#define NOTE_E8   5274
+#define NOTE_F8   5588
+#define NOTE_FS8  5920
+#define NOTE_G8   6272
+#define NOTE_GS8  6645
+#define NOTE_A8   7040
+#define NOTE_AS8  7459
+#define NOTE_B8   7902
 #define NOTE_REST 0
 
 typedef struct {
   uint16_t freq;
   uint16_t duration;
 } note_t;
+
+typedef void (*buzzer_voice_fn_t)(
+    const struct pwm_dt_spec *pwm,
+    uint32_t freq_hz,
+    uint32_t duration_ms
+);
+
+struct buzzer_request {
+    buzzer_voice_fn_t voice;
+    uint32_t freq_hz;
+    uint32_t duration_ms;
+};
 
 void buzzer_beep(uint32_t freq_hz, uint32_t duration_ms);
 void buzzer_play_melody(const note_t *melody, uint32_t length, bool loop);

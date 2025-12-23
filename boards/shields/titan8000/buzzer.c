@@ -8,6 +8,7 @@
 #include <zephyr/drivers/pwm.h>
 #include <zephyr/device.h>
 #include <zephyr/logging/log.h>
+#include <zephyr/sys/atomic.h>
 #include "buzzer.h"
 
 #include <zmk/event_manager.h>
@@ -26,57 +27,68 @@ static const note_t *current_melody = NULL;
 static uint32_t melody_length = 0;
 static uint32_t current_index = 0;
 static bool melody_loop = false;
-static struct k_timer melody_timer;
 static struct k_timer advertising_beep_timer;
 static bool is_advertising_beep_active = false;
 static bool keypress_beep_enabled = false;
+static struct k_work_delayable melody_work;
+static struct k_work buzzer_work;
+static struct k_work_delayable melody_work;
+static struct buzzer_request buzzer_req;
+static atomic_t buzzer_busy;
+static atomic_t melody_active;
+static atomic_t buzzer_abort;
 
-// BLE profile change melody (ascending tones)
-const note_t ble_profile_change[] = {
-    {NOTE_C6, 80},
-    {NOTE_E6, 80},
-    {NOTE_G6, 120}
+K_THREAD_STACK_DEFINE(buzzer_stack, 1024);
+static struct k_work_q buzzer_work_q;
+
+/* 0..255 scale (approx exponential decay) */
+static const uint8_t decay_lut[] = {
+    255, 220, 190, 165, 142, 122, 104,  88,
+     74,  62,  52,  43,  35,  28,  22,  17,
+     13,   9,   6,   4,   2,   1,   0
 };
 
-// BLE bond clear melody (descending tones)
-const note_t ble_bond_clear[] = {
-    {NOTE_G6, 80},
-    {NOTE_E6, 80},
-    {NOTE_C6, 120}
+// BLE profile change melody (descending tones)
+static const note_t ble_profile_change[] = {
+    {NOTE_G7, 140},
+    {NOTE_E7, 140},
+    {NOTE_C7, 140}
 };
 
-// BLE all bonds clear melody (warning sound)
-const note_t ble_all_bonds_clear[] = {
-    {NOTE_A6, 100},
-    {NOTE_REST, 50},
-    {NOTE_A6, 100},
-    {NOTE_REST, 50},
-    {NOTE_A6, 150}
-};
-
-// BLE disconnect melody (short beep)
-const note_t ble_disconnect[] = {
-    {NOTE_E6, 100},
-    {NOTE_REST, 50},
-    {NOTE_C6, 100}
+// BLE bond clear melody (ascending tones)
+static const note_t ble_bond_clear[] = {
+    {NOTE_C7, 140},
+    {NOTE_G7, 140}
 };
 
 // BLE advertising beep (repeating pip-pip)
-const note_t ble_advertising_beep[] = {
-    {NOTE_G6, 60},
-    {NOTE_REST, 40},
-    {NOTE_G6, 60}
+static const note_t ble_advertising_beep[] = {
+    {NOTE_G7, 150},
+    {NOTE_REST, 50},
+    {NOTE_G7, 150}
 };
 
-const note_t success[] = {
-    {NOTE_E6, 80}, {NOTE_B6, 80}, {NOTE_E7, 400},
+static const note_t success[] = {
+    {NOTE_E7, 140}, {NOTE_B7, 140}, {NOTE_E8, 400},
 };
 
-const note_t warning[] = {
+/*
+static const note_t warning[] = {
     {NOTE_A6, 100}, {NOTE_REST, 80},
     {NOTE_A6, 100}, {NOTE_REST, 80},
     {NOTE_A6, 100},
 };
+*/
+
+// keyprss toggle sound
+// static const note_t keypress_on[] = { {NOTE_C7, 100}, {NOTE_C8, 100} };
+static const note_t keypress_off[] = { {NOTE_E7, 100}, {NOTE_D7, 100} };
+
+
+// --- note_t配列だけで呼べるマクロ定義 ---
+#define BUZZER_PLAY_MELODY(notes_array) \
+    buzzer_play_melody_ex((notes_array), sizeof(notes_array) / sizeof(note_t), false, buzzer_voice_ad)
+
 
 void buzzer_beep(uint32_t freq_hz, uint32_t duration_ms)
 {
@@ -95,13 +107,27 @@ void buzzer_beep(uint32_t freq_hz, uint32_t duration_ms)
 	pwm_set_dt(&buzzer_pwm, 0, 0);
 }
 
+static void buzzer_voice_plain(
+    const struct pwm_dt_spec *pwm,
+    uint32_t freq_hz,
+    uint32_t duration_ms
+)
+{
+    uint32_t period_ns = 1000000000UL / freq_hz;
+    pwm_set_dt(pwm, period_ns, period_ns / 2);
+    k_msleep(duration_ms);
+    pwm_set_dt(pwm, 0, 0);
+}
+
+static buzzer_voice_fn_t current_voice = buzzer_voice_plain;
+
 static void buzzer_fall_quadratic_hz(
     const struct pwm_dt_spec *pwm,
     uint32_t f_start_hz,
     uint32_t f_end_hz,
     uint32_t duration_ms
 ) {
-    const uint32_t step_ms = 5;                    // 5ms刻み（ZMKでも現実的）
+    const uint32_t step_ms = 5;
     const uint32_t steps = duration_ms / step_ms;
     if (steps == 0) return;
 
@@ -125,30 +151,217 @@ static void buzzer_fall_quadratic_hz(
     pwm_set_dt(pwm, 0, 0);
 }
 
-static void melody_timer_callback(struct k_timer *timer)
+/*
+static void buzzer_voice_fall(
+    const struct pwm_dt_spec *pwm,
+    uint32_t freq_hz,
+    uint32_t duration_ms
+)
 {
-    if (current_index >= melody_length) {
-        if (melody_loop) {
-            current_index = 0;
-        } else {
-            buzzer_stop_melody();
-            return;
-        }
+    buzzer_fall_quadratic_hz(
+        pwm,
+        freq_hz,
+        freq_hz * 3 / 4,
+        duration_ms
+    );
+}
+*/
+
+static void buzzer_beep_ad(
+    const struct pwm_dt_spec *pwm,
+    uint32_t freq_hz,
+    uint32_t attack_ms,
+    uint32_t decay_ms
+) {
+    const uint32_t period_ns = 1000000000UL / freq_hz;
+    const uint32_t max_pulse = period_ns / 2;   // 50% duty
+
+    /* ---------- Attack (linear) ---------- */
+    const uint32_t attack_step_ms = 2;
+    uint32_t a_steps = attack_ms / attack_step_ms;
+    if (a_steps == 0) {
+        a_steps = 1;
     }
 
-    const note_t *note = &current_melody[current_index++];
-
-    if (note->freq == NOTE_REST) {
-        pwm_set_dt(&buzzer_pwm, 0, 0);
-    } else {
-        uint32_t period_ns = 1000000000UL / note->freq;
-        pwm_set_dt(&buzzer_pwm, period_ns, period_ns / 2);
+    for (uint32_t i = 0; i <= a_steps; i++) {
+        if (atomic_get(&buzzer_abort)) return;
+        uint32_t pulse = (max_pulse * i) / a_steps;
+        pwm_set_dt(pwm, period_ns, pulse);
+        k_sleep(K_MSEC(attack_step_ms));
     }
 
-    k_timer_start(&melody_timer, K_MSEC(note->duration), K_NO_WAIT);
+    /* ---------- Decay (LUT-based) ---------- */
+    /* Spread LUT over requested decay_ms */
+    uint32_t decay_step_ms = decay_ms / ARRAY_SIZE(decay_lut);
+    if (decay_step_ms == 0) {
+        decay_step_ms = 1;
+    }
+
+    for (uint32_t i = 0; i < ARRAY_SIZE(decay_lut); i++) {
+        if (atomic_get(&buzzer_abort)) return;
+        uint32_t pulse = (max_pulse * decay_lut[i]) / 255;
+        pwm_set_dt(pwm, period_ns, pulse);
+        k_sleep(K_MSEC(decay_step_ms));
+    }
+
+    /* Stop */
+    pwm_set_dt(pwm, 0, 0);
 }
 
-void buzzer_play_melody(const note_t *melody, uint32_t length, bool loop)
+static void buzzer_voice_ad_portamento(
+    const struct pwm_dt_spec *pwm,
+    uint32_t freq_start_hz,
+    uint32_t freq_end_hz,
+    uint32_t duration_ms
+)
+{
+    const uint32_t step_ms = 2;
+
+    uint32_t attack_ms = duration_ms / 6;
+    uint32_t decay_ms  = duration_ms / 4;
+
+    if (attack_ms < 4) attack_ms = 4;
+    if (decay_ms  < 8) decay_ms  = 8;
+
+    uint32_t total_steps = duration_ms / step_ms;
+    if (total_steps == 0) total_steps = 1;
+
+    uint32_t period_start = 1000000000UL / freq_start_hz;
+    uint32_t period_end   = 1000000000UL / freq_end_hz;
+
+    uint32_t max_pulse  = period_start / 2;
+    uint32_t duty_floor = max_pulse / 4;
+
+    for (uint32_t i = 0; i <= total_steps; i++) {
+        if (atomic_get(&buzzer_abort)) return;
+
+        /* ---- 周波数（全区間で線形ポルタメント） ---- */
+        uint32_t period =
+            period_start -
+            ((period_start - period_end) * i) / total_steps;
+
+        /* ---- 音量（AD） ---- */
+        uint32_t t_ms = i * step_ms;
+        uint32_t pulse;
+
+        if (t_ms < attack_ms) {
+            uint32_t a = t_ms * t_ms;
+            uint32_t b = attack_ms * attack_ms;
+            pulse = duty_floor +
+                ((max_pulse - duty_floor) * a) / b;
+        } else if (t_ms > (duration_ms - decay_ms)) {
+            uint32_t d = duration_ms - t_ms;
+            pulse = duty_floor +
+                ((max_pulse - duty_floor) * d) / decay_ms;
+        } else {
+            pulse = max_pulse * 3 / 4;
+        }
+
+        pwm_set_dt(pwm, period, pulse);
+        k_sleep(K_MSEC(step_ms));
+    }
+
+    pwm_set_dt(pwm, 0, 0);
+}
+
+
+static void buzzer_voice_ad(
+    const struct pwm_dt_spec *pwm,
+    uint32_t freq_hz,
+    uint32_t duration_ms
+)
+{
+    uint32_t attack_ms = duration_ms / 6;
+    uint32_t decay_ms  = duration_ms - attack_ms;
+
+    buzzer_beep_ad(pwm, freq_hz, attack_ms, decay_ms);
+}
+
+/* worker functions */
+static void buzzer_work_handler(struct k_work *work)
+{
+    buzzer_req.voice(
+        &buzzer_pwm,
+        buzzer_req.freq_hz,
+        buzzer_req.duration_ms
+    );
+
+    atomic_clear(&buzzer_busy);
+}
+
+static void melody_work_handler(struct k_work *work)
+{
+    /* Acquire PWM ownership */ 
+    if (!atomic_cas(&buzzer_busy, 0, 1)) {
+        /* Another beep is in-flight; reschedule a little later */
+        k_work_schedule_for_queue(&buzzer_work_q, &melody_work, K_MSEC(5));
+        return;                           
+    }                                     
+
+    if (!current_melody || melody_length == 0) {
+        atomic_clear(&melody_active);
+        atomic_clear(&buzzer_busy);       
+        return;
+    }
+
+    while (current_melody) {
+        if (atomic_get(&buzzer_abort)) break;
+
+        if (current_index >= melody_length) {
+            if (melody_loop) {
+                current_index = 0;
+            } else {
+                break;
+            }
+        }
+
+        const note_t *note = &current_melody[current_index++];
+
+        if (note->freq == NOTE_REST) {
+            pwm_set_dt(&buzzer_pwm, 0, 0);
+            k_msleep(note->duration);
+            continue;
+        }
+
+        current_voice(&buzzer_pwm, note->freq, note->duration);
+    }
+
+    pwm_set_dt(&buzzer_pwm, 0, 0);
+    atomic_clear(&melody_active);
+    current_melody = NULL;
+    atomic_clear(&buzzer_busy);           
+    atomic_clear(&buzzer_abort);
+}
+
+static bool buzzer_request(
+    buzzer_voice_fn_t voice,
+    uint32_t freq_hz,
+    uint32_t duration_ms
+)
+{
+    if (atomic_get(&melody_active))
+        return false;
+
+    atomic_set(&buzzer_abort, 1);
+    pwm_set_dt(&buzzer_pwm,0, 0);
+
+    atomic_set(&buzzer_busy, 1);
+    atomic_clear(&buzzer_abort);
+
+    buzzer_req.voice       = voice;
+    buzzer_req.freq_hz     = freq_hz;
+    buzzer_req.duration_ms = duration_ms;
+
+    k_work_submit_to_queue(&buzzer_work_q, &buzzer_work);
+    return true;
+}
+
+void buzzer_play_melody_ex(
+    const note_t *melody,
+    uint32_t length,
+    bool loop,
+    buzzer_voice_fn_t voice
+)
 {
     buzzer_stop_melody();
 
@@ -156,15 +369,23 @@ void buzzer_play_melody(const note_t *melody, uint32_t length, bool loop)
     melody_length = length;
     current_index = 0;
     melody_loop = loop;
+    current_voice = voice ? voice : buzzer_voice_plain;
 
-    k_timer_start(&melody_timer, K_NO_WAIT, K_NO_WAIT);
+    atomic_set(&melody_active, 1);
+    k_work_schedule_for_queue(&buzzer_work_q, &melody_work, K_NO_WAIT);
+}
+
+void buzzer_play_melody(const note_t *melody, uint32_t length, bool loop)
+{
+    buzzer_play_melody_ex(melody, length, loop, buzzer_voice_plain);
 }
 
 void buzzer_stop_melody(void)
 {
-    k_timer_stop(&melody_timer);
+    k_work_cancel_delayable(&melody_work);
     pwm_set_dt(&buzzer_pwm, 0, 0);
     current_melody = NULL;
+    atomic_clear(&melody_active);
 }
 
 bool buzzer_is_playing(void)
@@ -179,11 +400,10 @@ void buzzer_toggle_keypress_beep(void)
     
     // Play confirmation sound
     if (keypress_beep_enabled) {
-        note_t melody[] = { {NOTE_C6, 100} };
-        buzzer_play_melody(melody, 1, false);
+        buzzer_voice_ad_portamento(&buzzer_pwm, NOTE_C7, NOTE_B7, 180);
+//        BUZZER_PLAY_MELODY(keypress_on);
     } else {
-        note_t melody[] = { {NOTE_E6, 100} };
-        buzzer_play_melody(melody, 1, false);
+        BUZZER_PLAY_MELODY(keypress_off);
     }
 }
 
@@ -201,7 +421,7 @@ static void advertising_beep_callback(struct k_timer *timer)
 {
     if (!zmk_ble_active_profile_is_connected()) {
         // Not connected, play advertising beep
-        buzzer_play_melody(ble_advertising_beep, sizeof(ble_advertising_beep) / sizeof(note_t), false);
+        BUZZER_PLAY_MELODY(ble_advertising_beep);
     } else {
         // Connected, stop advertising beep
         is_advertising_beep_active = false;
@@ -238,12 +458,20 @@ static int buzzer_init(void)
     LOG_INF("PWM Device: %s", buzzer_pwm.dev->name);
     LOG_INF("PWM Ready: YES");
     LOG_INF("========================================");
-    
-    // Initialize timers once
-    k_timer_init(&melody_timer, melody_timer_callback, NULL);
+        
+    k_work_queue_start(
+        &buzzer_work_q,
+        buzzer_stack,
+        K_THREAD_STACK_SIZEOF(buzzer_stack),
+        K_PRIO_PREEMPT(5),
+        NULL
+    );
+
+    k_work_init(&buzzer_work, buzzer_work_handler);
+    k_work_init_delayable(&melody_work, melody_work_handler);
     k_timer_init(&advertising_beep_timer, advertising_beep_callback, NULL);
-    
-    buzzer_play_melody(success, ARRAY_SIZE(success), false);
+
+    BUZZER_PLAY_MELODY(success);
 
     return 0;
 }
@@ -260,8 +488,7 @@ static int buzzer_keypress_listener(const zmk_event_t *eh)
     // Only play sound when the key is pressed (do not play when released)
     if (ev->state && keypress_beep_enabled) {
         LOG_INF("KEY PRESSED at position %d", ev->position);
-    //    buzzer_beep(4000, 50);  // 4kHz, 50ms
-        buzzer_pitch_fall();
+        buzzer_request(buzzer_voice_ad, NOTE_B7, 150);
     }
 
     return ZMK_EV_EVENT_BUBBLE;
@@ -282,13 +509,12 @@ static int buzzer_ble_profile_listener(const zmk_event_t *eh)
     // Check if the profile is open (no bond) - likely a clear operation
     if (zmk_ble_profile_is_open(ev->index)) {
         LOG_INF("Profile is open (cleared)");
-        buzzer_play_melody(ble_bond_clear, sizeof(ble_bond_clear) / sizeof(note_t), false);
+        BUZZER_PLAY_MELODY(ble_bond_clear);
         // Start advertising beep after clearing
         start_advertising_beep();
     } else {
         LOG_INF("Profile switched");
-        buzzer_play_melody(ble_profile_change, sizeof(ble_profile_change) / sizeof(note_t), false);
-        
+        BUZZER_PLAY_MELODY(ble_profile_change);
         // Check if connected, if not start advertising beep
         if (!zmk_ble_active_profile_is_connected()) {
             start_advertising_beep();
