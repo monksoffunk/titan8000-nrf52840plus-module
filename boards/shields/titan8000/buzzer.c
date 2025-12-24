@@ -19,16 +19,17 @@
 LOG_MODULE_REGISTER(buzzer, CONFIG_ZMK_LOG_LEVEL);
 
 #ifdef CONFIG_TITAN8000_BUZZER
-// Buzzer implementation (only compiled when CONFIG_TITAN8000_BUZZER is enabled)
 
 #define BUZZER_NODE DT_CHILD(DT_PATH(buzzers), buzzer)
+#define BUZZER_PORTAMENT_UP_ENABLE
+// #define BUZZER_PORTAMENT_DOWN_ENABLE
+// #define BUZZER_FALL_ENABLE
 
 struct buzzer_state {
     struct pwm_dt_spec pwm;
 
     struct k_work_q work_q;
-    struct k_work work;
-    struct k_work_delayable melody_work;
+    struct k_work work, melody_work;
     struct k_timer adv_timer;
 
     const note_t *melody;
@@ -50,7 +51,6 @@ static struct buzzer_state buzzer;
 enum buzzer_state_bits {
     BUZZER_ENABLED = 0,
     BUZZER_BUSY,
-    BUZZER_MELODY_ACTIVE,
     BUZZER_ABORT,
 };
 
@@ -117,14 +117,6 @@ static const note_t soft_off[] = {
     {NOTE_D6, 140},
 };
 
-/*
-static const note_t warning[] = {
-    {NOTE_A6, 100}, {NOTE_REST, 80},
-    {NOTE_A6, 100}, {NOTE_REST, 80},
-    {NOTE_A6, 100},
-};
-*/
-
 // keyprss toggle sound
 // static const note_t keypress_on[] = { {NOTE_C7, 100}, {NOTE_C8, 100} };
 static const note_t keypress_off[] = { {NOTE_E7, 100}, {NOTE_D7, 100} };
@@ -132,27 +124,6 @@ static const note_t keypress_off[] = { {NOTE_E7, 100}, {NOTE_D7, 100} };
 
 #define BUZZER_MELODY_REQ(notes_array) \
     buzzer_melody_request((notes_array), sizeof(notes_array) / sizeof(note_t), false, buzzer_voice_ad)
-
-#define BUZZER_PLAY_MELODY(notes_array) \
-    buzzer_play_melody_ex((notes_array), sizeof(notes_array) / sizeof(note_t), false, buzzer_voice_ad)
-
-
-void buzzer_beep(uint32_t freq_hz, uint32_t duration_ms)
-{
-    if (!device_is_ready(buzzer.pwm.dev)) {
-		    LOG_INF("========================================");
-			LOG_INF("PWM BUZZER not ready!!");
-		    LOG_INF("========================================");
-        return;
-    }
-
-    uint32_t period_ns = 1000000000UL / freq_hz;
-
-    pwm_set_dt(&buzzer.pwm, period_ns, period_ns / 2);  // 50% duty
-    k_msleep(duration_ms);
-	// off
-	pwm_set_dt(&buzzer.pwm, 0, 0);
-}
 
 static void buzzer_voice_plain(
     const struct pwm_dt_spec *pwm,
@@ -167,7 +138,7 @@ static void buzzer_voice_plain(
 }
 
 
-/*
+#ifdef BUZZER_FALL_ENABLE
 static void buzzer_fall_quadratic_hz(
     const struct pwm_dt_spec *pwm,
     uint32_t f_start_hz,
@@ -179,8 +150,6 @@ static void buzzer_fall_quadratic_hz(
     if (steps == 0) return;
 
     for (uint32_t i = 0; i <= steps; i++) {
-        // t = i/steps, curve = t^2 (0->1)
-        // freq = f_start - (f_start-f_end)*t^2
         uint32_t num = i * i;                      // i^2
         uint32_t den = steps * steps;              // steps^2
         uint32_t df  = f_start_hz - f_end_hz;
@@ -211,7 +180,12 @@ static void buzzer_voice_fall(
         duration_ms
     );
 }
-*/
+
+static void buzzer_pitch_fall() 
+{
+    buzzer_fall_quadratic_hz(&buzzer.pwm, 4000, 3000, 50);
+}
+#endif /* BUZZER_FALL_ENABLE */
 
 static void buzzer_beep_ad(
     const struct pwm_dt_spec *pwm,
@@ -254,7 +228,8 @@ static void buzzer_beep_ad(
     pwm_set_dt(pwm, 0, 0);
 }
 
-static void buzzer_voice_ad_portamento(
+#if defined(BUZZER_PORTAMENT_UP_ENABLE) || defined(BUZZER_PORTAMENT_DOWN_ENABLE) || defined(BUZZER_PORTAMENT_ENABLE)
+static void buzzer_ad_portamento(
     const struct pwm_dt_spec *pwm,
     uint32_t freq_start_hz,
     uint32_t freq_end_hz,
@@ -282,10 +257,7 @@ static void buzzer_voice_ad_portamento(
     for (int32_t i = 0; i <= total_steps; i++) {
         if (atomic_test_bit(&buzzer.state, BUZZER_ABORT)) return;
 
-        /* ---- 周波数（全区間で線形ポルタメント） ---- */
         uint32_t period = period_start - (period_diff * i) / total_steps;
-
-        /* ---- 音量（AD） ---- */
         uint32_t t_ms = i * step_ms;
         uint32_t pulse;
 
@@ -308,7 +280,22 @@ static void buzzer_voice_ad_portamento(
 
     pwm_set_dt(pwm, 0, 0);
 }
+#endif /* defined(BUZZER_PORTAMENT_UP_ENABLE) || defined(BUZZER_PORTAMENT_DOWN_ENABLE) || defined(BUZZER_PORTAMENT_ENABLE) */
 
+#ifdef BUZZER_PORTAMENT_UP_ENABLE
+static void buzzer_voice_ad_portamento_up(const struct pwm_dt_spec *pwm, uint32_t freq, uint32_t duration_ms) {
+    int32_t freq_end = freq + freq / 12;
+    buzzer_ad_portamento(pwm, freq, freq_end, duration_ms);
+}
+#endif
+
+#ifdef BUZZER_PORTAMENTO_DOWN_ENABLE
+static void buzzer_voice_ad_portamento_down(const struct pwm_dt_spec *pwm, uint32_t freq, uint32_t duration_ms) {
+    int32_t freq_end = freq - freq / 12;
+    if (freq_end <= 0) return;
+    buzzer_ad_portamento(pwm, freq, freq_end, duration_ms);
+}
+#endif
 
 static void buzzer_voice_ad(
     const struct pwm_dt_spec *pwm,
@@ -332,9 +319,10 @@ static void buzzer_work_handler(struct k_work *work)
     );
 
     atomic_clear_bit(&buzzer.state, BUZZER_BUSY);
+    if (!k_fifo_is_empty(&buzzer_melody_fifo)) {
+        k_work_submit_to_queue(&buzzer.work_q, &buzzer.melody_work);
+    }
 }
-
-
 
 static bool buzzer_request(
     buzzer_voice_fn_t voice,
@@ -342,17 +330,12 @@ static bool buzzer_request(
     uint32_t duration_ms
 )
 {
-    if (atomic_test_bit(&buzzer.state, BUZZER_MELODY_ACTIVE))
-        return false;
-
     if (!atomic_test_bit(&buzzer.state, BUZZER_ENABLED)) {
         return false;
     }
 
     atomic_set_bit(&buzzer.state, BUZZER_ABORT);
     pwm_set_dt(&buzzer.pwm,0, 0);
-
-    atomic_set_bit(&buzzer.state, BUZZER_BUSY);
     atomic_clear_bit(&buzzer.state, BUZZER_ABORT);
 
     buzzer.req.voice       = voice;
@@ -402,41 +385,16 @@ bool buzzer_melody_request(
     req->voice = voice ? voice : buzzer_voice_plain;
 
     k_fifo_put(&buzzer_melody_fifo, req);
-
-    if (!atomic_test_bit(&buzzer.state, BUZZER_MELODY_ACTIVE)) {
-        atomic_set_bit(&buzzer.state, BUZZER_MELODY_ACTIVE);
-        k_work_submit_to_queue(&buzzer.work_q, &buzzer.melody_work.work);
-    }
+    k_work_submit_to_queue(&buzzer.work_q, &buzzer.melody_work);
 
     return true;
 }
 
-void buzzer_play_melody_ex(
-    const note_t *melody,
-    uint32_t length,
-    bool loop,
-    buzzer_voice_fn_t voice
-)
-{
-    if (!atomic_test_bit(&buzzer.state, BUZZER_ENABLED)) {
+static void melody_work_handler(struct k_work *work) {
+
+    if (atomic_test_and_set_bit(&buzzer.state, BUZZER_BUSY)) {
         return;
     }
-
-    buzzer.melody = melody;
-    buzzer.melody_len = length;
-    buzzer.index = 0;
-    buzzer.loop = loop;
-    buzzer.voice = voice ? voice : buzzer_voice_plain;
-}
-
-void buzzer_play_melody(const note_t *melody, uint32_t length, bool loop)
-{
-    buzzer_play_melody_ex(melody, length, loop, buzzer_voice_plain);
-}
-
-
-static void melody_work_handler(struct k_work *work) {
-    atomic_set_bit(&buzzer.state, BUZZER_BUSY);
 
     while (1) {
         struct buzzer_melody_request *req =
@@ -465,20 +423,6 @@ static void melody_work_handler(struct k_work *work) {
     }
 
     atomic_clear_bit(&buzzer.state, BUZZER_BUSY);
-    atomic_clear_bit(&buzzer.state, BUZZER_MELODY_ACTIVE);
-}
-
-void buzzer_stop_melody(void)
-{
-    k_work_cancel_delayable(&(buzzer.melody_work));
-    pwm_set_dt(&buzzer.pwm, 0, 0);
-    buzzer.melody = NULL;
-    atomic_clear_bit(&buzzer.state, BUZZER_MELODY_ACTIVE);
-}
-
-bool buzzer_is_playing(void)
-{
-    return (buzzer.melody != NULL);
 }
 
 void buzzer_toggle_keypress_beep(void)
@@ -488,18 +432,12 @@ void buzzer_toggle_keypress_beep(void)
     
     // Play confirmation sound
     if (buzzer.keypress_enabled) {
-        buzzer_voice_ad_portamento(&buzzer.pwm, NOTE_C7, NOTE_B7, 140);
-//      BUZZER_MELODY_REQ(keypress_on);
+        buzzer_voice_ad_portamento_up(&buzzer.pwm, NOTE_C7, 140);
+        //BUZZER_MELODY_REQ(keypress_on);
     } else {
         BUZZER_MELODY_REQ(keypress_off);
     }
 }
-/*
-static void buzzer_pitch_fall() 
-{
-    buzzer_fall_quadratic_hz(&buzzer.pwm, 4000, 3000, 50);
-}
-*/
 
 bool buzzer_is_keypress_enabled(void)
 {
@@ -555,26 +493,20 @@ static int buzzer_init(void)
     LOG_INF("========================================");
     
     k_work_queue_start(
-        &(buzzer.work_q),
+        &buzzer.work_q,
         buzzer_stack,
         K_THREAD_STACK_SIZEOF(buzzer_stack),
         K_PRIO_PREEMPT(5),
         NULL
     );
 
-    k_work_init(&(buzzer.work), buzzer_work_handler);
-    k_work_init_delayable(&(buzzer.melody_work), melody_work_handler);
-    k_timer_init(&(buzzer.adv_timer), advertising_beep_callback, NULL);
+    k_work_init(&buzzer.work, buzzer_work_handler);
+    k_work_init(&buzzer.melody_work, melody_work_handler);
+    k_timer_init(&buzzer.adv_timer, advertising_beep_callback, NULL);
 
     BUZZER_MELODY_REQ(success);
 
     return 0;
-}
-
-void titan8000_play_soft_off_tone(void) {
-    BUZZER_MELODY_REQ(soft_off);
-   // buzzer_voice_ad_portamento(&buzzer.pwm, NOTE_B7, NOTE_C7, 140);
-    k_sleep(K_MSEC(900));
 }
 
 SYS_INIT(buzzer_init, APPLICATION, CONFIG_APPLICATION_INIT_PRIORITY);
@@ -641,6 +573,11 @@ void buzzer_toggle_enable(void)
         atomic_set_bit(&buzzer.state, BUZZER_ENABLED);
         LOG_INF("Buzzer enabled");
     }
+}
+
+void titan8000_play_soft_off_tone(void) {
+    BUZZER_MELODY_REQ(soft_off);
+    k_sleep(K_MSEC(900));
 }
 
 #endif /* CONFIG_TITAN8000_BUZZER */
