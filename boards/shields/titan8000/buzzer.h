@@ -75,12 +75,20 @@ struct buzzer_request {
     uint32_t duration_ms;
 };
 
-void buzzer_play_melody(const note_t *melody, uint32_t length, bool loop);
-void buzzer_stop_melody(void);
-bool buzzer_is_playing(void);
+/**
+ * @brief Toggles the buzzer hardware enable state.
+ *
+ * Enables or disables the buzzer output globally. Calling this function
+ * switches the buzzer between enabled and disabled states.
+ */
 void buzzer_toggle_enable(void);
-void titan8000_play_soft_off_tone(void);
 
+/**
+ * @brief Plays the soft power-off tone sequence.
+ *
+ * Plays a short, gentle tone used to indicate the device is powering down.
+ */
+void titan8000_play_soft_off_tone(void);
 
 /**
  * @brief Toggles the keypress beep feature on or off.
