@@ -9,12 +9,13 @@
 #include <zephyr/device.h>
 #include <zephyr/logging/log.h>
 #include <zephyr/sys/atomic.h>
-#include "buzzer.h"
-
+#include <zmk/events/endpoint_changed.h>
 #include <zmk/event_manager.h>
 #include <zmk/events/position_state_changed.h>
 #include <zmk/events/ble_active_profile_changed.h>
 #include <zmk/ble.h>
+
+#include "buzzer.h"
 
 LOG_MODULE_REGISTER(buzzer, CONFIG_ZMK_LOG_LEVEL);
 
@@ -51,7 +52,7 @@ static struct buzzer_state buzzer;
 
 enum buzzer_state_bits {
     BUZZER_ENABLED = 0,
-    BUZZER_BUSY,
+//    BUZZER_BUSY,
     BUZZER_ABORT,
     BUZZER_INTERRUPT_PENDING,
 };
@@ -147,6 +148,18 @@ static const note_t soft_off[] = {
     {NOTE_G6, 140}, 
     {NOTE_REST, 100}, 
     {NOTE_D6, 140},
+};
+
+static const note_t ble_on[] = {
+    {NOTE_G8, 50},
+    {NOTE_REST, 50},
+    {NOTE_G8, 50},
+};
+
+static const note_t usb_on[] = {
+    {NOTE_C8, 50},
+    {NOTE_REST, 50},
+    {NOTE_C8, 50},
 };
 
 // keyprss toggle sound
@@ -471,7 +484,7 @@ static void melody_work_handler(struct k_work *work) {
         req = NULL;
     }
 
-    atomic_clear_bit(&buzzer.state, BUZZER_BUSY);
+//    atomic_clear_bit(&buzzer.state, BUZZER_BUSY);
 }
 
 void buzzer_toggle_keypress_beep(void)
@@ -632,14 +645,43 @@ void buzzer_toggle_enable(void)
 {
     if (atomic_test_bit(&buzzer.state, BUZZER_ENABLED)) {
         atomic_clear_bit(&buzzer.state, BUZZER_ENABLED);
+        atomic_set_bit(&buzzer.state, BUZZER_ABORT);
         pwm_set_dt(&buzzer.pwm, 0, 0);
         atomic_set_bit(&buzzer.state, BUZZER_ABORT);
         LOG_INF("Buzzer muted");
     } else {
+        atomic_clear_bit(&buzzer.state, BUZZER_ABORT);
         atomic_set_bit(&buzzer.state, BUZZER_ENABLED);
         LOG_INF("Buzzer enabled");
     }
 }
+
+static int buzzer_output_listener(const zmk_event_t *eh)
+{
+    const struct zmk_endpoint_changed *ev = as_zmk_endpoint_changed(eh);
+
+    if (!ev) {
+        return ZMK_EV_EVENT_BUBBLE;
+    }
+
+    switch (ev->endpoint.transport) {
+    case ZMK_TRANSPORT_USB:
+        BUZZER_MELODY_REQ(usb_on);
+        break;
+
+    case ZMK_TRANSPORT_BLE:
+        BUZZER_MELODY_REQ(ble_on);
+        break;
+
+    default:
+        break;
+    }
+
+    return ZMK_EV_EVENT_BUBBLE;
+}
+
+ZMK_LISTENER(buzzer_output, buzzer_output_listener);
+ZMK_SUBSCRIPTION(buzzer_output, zmk_endpoint_changed);
 
 void titan8000_play_soft_off_tone(void) {
     BUZZER_MELODY_REQ(soft_off);
