@@ -1,8 +1,6 @@
 config SHIELD_TITAN8000
 	def_bool $(shields_list_contains,titan8000)
 
-if SHIELD_TITAN8000
-
 config TITAN8000_BUZZER
 	bool "Enable buzzer support for Titan8000"
 	depends on BOARD_SEEEDUINO_XIAO_BLE
@@ -14,5 +12,3 @@ config TITAN8000_BUZZER
 	help
 	  Enable PWM-based buzzer support for Titan8000 keyboard.
 	  This requires hardware with PWM capability (e.g., Xiao BLE).
-
-endif
