@@ -3,7 +3,7 @@
  *
  * This behavior does NOT power off the device directly.
  * It only requests soft-off, which will be executed
- * by the charlieplex kscan driver at a safe time.
+ * by the custom charlieplex kscan driver at a safe time.
  */
 #define DT_DRV_COMPAT zmk_behavior_titan8000_soft_off
 
